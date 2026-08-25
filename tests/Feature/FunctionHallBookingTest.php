@@ -60,6 +60,14 @@ test('the booking page renders with the bookable halls', function () {
         ->assertDontSee('Closed For Repairs');
 });
 
+test('the page says so when nothing is bookable', function () {
+    Hall::query()->delete();
+
+    $this->get(route('booking.function-hall'))
+        ->assertOk()
+        ->assertSee('No function halls are available to book right now.');
+});
+
 test('the quote prices rent per four-hour block plus a one-time skirting fee', function () {
     $quote = $this->hall->quote(hours: 8, includeSkirting: true);
 

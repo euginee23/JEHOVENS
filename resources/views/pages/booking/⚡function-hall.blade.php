@@ -417,53 +417,59 @@ class extends Component {
                 <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
                     <h2 class="text-lg font-semibold text-zinc-900">{{ __('Select a function hall') }}</h2>
 
-                    <div class="mt-6 space-y-4" role="radiogroup" aria-label="{{ __('Function halls') }}">
-                        @foreach ($this->halls as $hall)
-                            <button
-                                type="button"
-                                wire:key="hall-{{ $hall->id }}"
-                                wire:click="selectHall({{ $hall->id }})"
-                                role="radio"
-                                aria-checked="{{ $hall_id === $hall->id ? 'true' : 'false' }}"
-                                @class([
-                                    'w-full rounded-2xl border p-5 text-left transition',
-                                    'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500' => $hall_id === $hall->id,
-                                    'border-zinc-200 bg-white hover:border-brand-300 hover:bg-zinc-50' => $hall_id !== $hall->id,
-                                ])
-                            >
-                                <div class="flex items-start justify-between gap-4">
-                                    <div class="min-w-0">
-                                        <h3 class="text-lg font-semibold text-zinc-900">{{ $hall->name }}</h3>
-                                        <p class="mt-1.5 text-sm/6 text-zinc-600">{{ $hall->description }}</p>
+                    @if ($this->halls->isEmpty())
+                        <p class="mt-6 rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500">
+                            {{ __('No function halls are available to book right now. Please check back later.') }}
+                        </p>
+                    @else
+                        <div class="mt-6 space-y-4" role="radiogroup" aria-label="{{ __('Function halls') }}">
+                            @foreach ($this->halls as $hall)
+                                <button
+                                    type="button"
+                                    wire:key="hall-{{ $hall->id }}"
+                                    wire:click="selectHall({{ $hall->id }})"
+                                    role="radio"
+                                    aria-checked="{{ $hall_id === $hall->id ? 'true' : 'false' }}"
+                                    @class([
+                                        'w-full rounded-2xl border p-5 text-left transition',
+                                        'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500' => $hall_id === $hall->id,
+                                        'border-zinc-200 bg-white hover:border-brand-300 hover:bg-zinc-50' => $hall_id !== $hall->id,
+                                    ])
+                                >
+                                    <div class="flex items-start justify-between gap-4">
+                                        <div class="min-w-0">
+                                            <h3 class="text-lg font-semibold text-zinc-900">{{ $hall->name }}</h3>
+                                            <p class="mt-1.5 text-sm/6 text-zinc-600">{{ $hall->description }}</p>
+                                        </div>
+
+                                        <span @class([
+                                            'mt-1 flex size-5 shrink-0 items-center justify-center rounded-full border-2',
+                                            'border-brand-600 bg-brand-600 text-white' => $hall_id === $hall->id,
+                                            'border-zinc-300' => $hall_id !== $hall->id,
+                                        ])>
+                                            @if ($hall_id === $hall->id)
+                                                <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.5 4.5L19 7.5" />
+                                                </svg>
+                                            @endif
+                                        </span>
                                     </div>
 
-                                    <span @class([
-                                        'mt-1 flex size-5 shrink-0 items-center justify-center rounded-full border-2',
-                                        'border-brand-600 bg-brand-600 text-white' => $hall_id === $hall->id,
-                                        'border-zinc-300' => $hall_id !== $hall->id,
-                                    ])>
-                                        @if ($hall_id === $hall->id)
-                                            <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true">
-                                                <path stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.5 4.5L19 7.5" />
-                                            </svg>
-                                        @endif
-                                    </span>
-                                </div>
-
-                                <div class="mt-4 flex flex-wrap gap-2 border-t border-zinc-200 pt-4">
-                                    <span class="rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white">
-                                        {{ __('Rent: ₱:price / :hours hours', ['price' => number_format($hall->rent_price), 'hours' => \App\Models\Hall::HOURS_PER_BLOCK]) }}
-                                    </span>
-                                    <span class="rounded-full bg-coral-500 px-3 py-1.5 text-xs font-semibold text-white">
-                                        {{ __('Skirting: ₱:price', ['price' => number_format($hall->skirting_price)]) }}
-                                    </span>
-                                    <span class="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-600">
-                                        {{ trans_choice('{1} :count guest|[2,*] up to :count guests', $hall->capacity, ['count' => number_format($hall->capacity)]) }}
-                                    </span>
-                                </div>
-                            </button>
-                        @endforeach
-                    </div>
+                                    <div class="mt-4 flex flex-wrap gap-2 border-t border-zinc-200 pt-4">
+                                        <span class="rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white">
+                                            {{ __('Rent: ₱:price / :hours hours', ['price' => number_format($hall->rent_price), 'hours' => \App\Models\Hall::HOURS_PER_BLOCK]) }}
+                                        </span>
+                                        <span class="rounded-full bg-coral-500 px-3 py-1.5 text-xs font-semibold text-white">
+                                            {{ __('Skirting: ₱:price', ['price' => number_format($hall->skirting_price)]) }}
+                                        </span>
+                                        <span class="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-600">
+                                            {{ trans_choice('{1} :count guest|[2,*] up to :count guests', $hall->capacity, ['count' => number_format($hall->capacity)]) }}
+                                        </span>
+                                    </div>
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
 
                     @error('hall_id')
                         <p class="mt-4 text-sm font-medium text-red-600">{{ $message }}</p>
