@@ -23,11 +23,10 @@
     --color-zinc-900: #171717;
     --color-zinc-950: #0a0a0a;
 
-    /* Drives Flux's `variant="primary"` buttons and focus rings. The marketing page
-       styles itself with the brand palette directly and uses no Flux components, so
-       this stays neutral and the authenticated app is untouched. Point it at
-       `var(--color-brand-600)` to take the whole app teal. */
-    --color-accent: var(--color-neutral-800);
+    /* Drives Flux's `variant="primary"` buttons and every Flux focus ring. The public
+       booking forms use Flux inputs, so this points at the brand to keep them on
+       palette; the .dark block below flips it back to white for the authenticated app. */
+    --color-accent: var(--color-brand-600);
     --color-accent-content: var(--color-neutral-800);
     --color-accent-foreground: var(--color-white);
 

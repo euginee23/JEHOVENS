@@ -210,7 +210,7 @@
                         __('Optional event decorations'),
                     ]"
                     :cta="__('Reserve a hall')"
-                    :href="auth()->check() ? route('dashboard') : route('register')"
+                    :href="route('booking.function-hall')"
                 >
                     {{ __('Spacious halls for birthdays, reunions, meetings, and celebrations of every size.') }}
                 </x-marketing.offer-card>

@@ -1,11 +1,11 @@
-{{-- Single-page marketing nav: every link is an on-page anchor, so no wire:navigate
-     and no route-based active state. --}}
+{{-- Marketing nav. The section links are absolute so they also work from the booking
+     pages, where those anchors do not exist on the current document. --}}
 @php
     $links = [
-        ['label' => __('Function Hall'), 'href' => '#function-hall'],
-        ['label' => __('Rooms'), 'href' => '#rooms'],
-        ['label' => __('Catering'), 'href' => '#catering'],
-        ['label' => __('About'), 'href' => '#about'],
+        ['label' => __('Function Hall'), 'href' => route('booking.function-hall')],
+        ['label' => __('Rooms'), 'href' => route('home').'#rooms'],
+        ['label' => __('Catering'), 'href' => route('home').'#catering'],
+        ['label' => __('About'), 'href' => route('home').'#about'],
     ];
 @endphp
 

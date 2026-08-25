@@ -1,9 +1,9 @@
 @php
     $explore = [
-        ['label' => __('Function Hall'), 'href' => '#function-hall'],
-        ['label' => __('Rooms'), 'href' => '#rooms'],
-        ['label' => __('Catering'), 'href' => '#catering'],
-        ['label' => __('About the resort'), 'href' => '#about'],
+        ['label' => __('Function Hall'), 'href' => route('booking.function-hall')],
+        ['label' => __('Rooms'), 'href' => route('home').'#rooms'],
+        ['label' => __('Catering'), 'href' => route('home').'#catering'],
+        ['label' => __('About the resort'), 'href' => route('home').'#about'],
     ];
 @endphp
 
