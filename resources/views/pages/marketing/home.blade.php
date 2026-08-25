@@ -226,7 +226,7 @@
                         __('Pool access for adults and kids'),
                     ]"
                     :cta="__('Reserve a room')"
-                    :href="auth()->check() ? route('dashboard') : route('register')"
+                    :href="route('booking.rooms')"
                 >
                     {{ __('Comfortable accommodations you can book by the hour or for the whole night.') }}
                 </x-marketing.offer-card>

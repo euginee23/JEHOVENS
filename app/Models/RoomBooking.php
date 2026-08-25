@@ -1,0 +1,116 @@
+<?php
+
+namespace App\Models;
+
+use App\Enums\BookingStatus;
+use Carbon\CarbonInterface;
+use Database\Factories\RoomBookingFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
+
+/**
+ * @property int $id
+ * @property string $reference
+ * @property int $room_id
+ * @property int|null $user_id
+ * @property string $guest_name
+ * @property string $guest_phone
+ * @property string $guest_email
+ * @property Carbon $starts_at
+ * @property Carbon $ends_at
+ * @property int $hours
+ * @property bool $pay_in_full
+ * @property int $total
+ * @property int $amount_paid
+ * @property int $balance
+ * @property BookingStatus $status
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ * @property-read Room $room
+ * @property-read User|null $user
+ */
+#[Fillable([
+    'reference', 'room_id', 'user_id', 'guest_name', 'guest_phone', 'guest_email',
+    'starts_at', 'ends_at', 'hours', 'pay_in_full', 'total', 'amount_paid', 'balance', 'status',
+])]
+class RoomBooking extends Model
+{
+    /** @use HasFactory<RoomBookingFactory> */
+    use HasFactory;
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'starts_at' => 'datetime',
+            'ends_at' => 'datetime',
+            'hours' => 'integer',
+            'pay_in_full' => 'boolean',
+            'total' => 'integer',
+            'amount_paid' => 'integer',
+            'balance' => 'integer',
+            'status' => BookingStatus::class,
+        ];
+    }
+
+    /**
+     * The room this booking reserves.
+     *
+     * @return BelongsTo<Room, $this>
+     */
+    public function room(): BelongsTo
+    {
+        return $this->belongsTo(Room::class);
+    }
+
+    /**
+     * The account that made the booking, if the guest was signed in.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Limit the query to bookings that still hold their room.
+     *
+     * @param  Builder<RoomBooking>  $query
+     */
+    #[Scope]
+    protected function blocking(Builder $query): void
+    {
+        $query->whereIn('status', BookingStatus::blocking());
+    }
+
+    /**
+     * When the guest is asked to arrive, a little ahead of their entry time.
+     */
+    public function arriveBy(): CarbonInterface
+    {
+        return $this->starts_at->copy()->subMinutes(Room::ARRIVE_EARLY_MINUTES);
+    }
+
+    /**
+     * Generate a booking reference that does not collide with an existing one.
+     */
+    public static function generateReference(): string
+    {
+        do {
+            $reference = 'JGR-R'.Str::upper(Str::random(5));
+        } while (static::where('reference', $reference)->exists());
+
+        return $reference;
+    }
+}
