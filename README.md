@@ -11,19 +11,21 @@ Built on Laravel 13 with Livewire 4, Flux UI, and Tailwind CSS v4.
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| PHP | 8.4.1 or newer | With the `pdo_sqlite` and `sqlite3` extensions enabled |
+| PHP | 8.4.1 or newer | With the `pdo_mysql` extension enabled |
+| MySQL | 8.0 or newer | MariaDB 10.6+ also works |
 | Composer | 2.x | |
 | Node.js | 22.12+ (or 20.19+) | Required by Vite 8 |
 | npm | 10+ | Ships with Node |
 
-No database server is needed — the app uses SQLite by default and creates the database
-file for you.
+The app runs on MySQL. The test suite runs on in-memory SQLite (configured in
+`phpunit.xml`), so tests need no database server of their own.
 
 Check what you have:
 
 ```bash
 php -v && composer -V && node -v
-php -m | grep sqlite   # should list pdo_sqlite and sqlite3
+php -m | grep pdo_mysql   # should print pdo_mysql
+mysql --version
 ```
 
 ---
@@ -33,9 +35,17 @@ php -m | grep sqlite   # should list pdo_sqlite and sqlite3
 ```bash
 git clone <repository-url> jehovens
 cd jehovens
+
+# Create the database first — composer setup migrates into it.
+mysql -u root -p -e "CREATE DATABASE jehovens CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
 composer setup
 composer dev
 ```
+
+If your MySQL credentials differ from the defaults in `.env.example` (`root` with no
+password on `127.0.0.1:3306`), edit `.env` after the first `composer setup` run and then
+run `php artisan migrate`.
 
 Then open **http://localhost:8000**.
 
@@ -51,7 +61,7 @@ It runs these six steps in order:
 1. `composer install` — installs PHP dependencies into `vendor/`
 2. Copies `.env.example` to `.env` (skipped if `.env` already exists)
 3. `php artisan key:generate` — writes a fresh `APP_KEY`
-4. `php artisan migrate --force` — creates `database/database.sqlite` and its tables
+4. `php artisan migrate --force` — creates the tables in your `jehovens` database
 5. `npm install` — installs JS dependencies into `node_modules/`
 6. `npm run build` — compiles CSS/JS into `public/build/`
 
@@ -67,13 +77,13 @@ that part:
 composer install
 cp .env.example .env
 php artisan key:generate
-touch database/database.sqlite
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS jehovens CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 php artisan migrate
 npm install
 npm run build
 ```
 
-`.env` and `database/database.sqlite` are both gitignored, so every machine gets its own.
+`.env` is gitignored, so every machine gets its own database credentials.
 
 ---
 
@@ -165,10 +175,9 @@ There is no `tailwind.config.js` — Tailwind v4 is configured entirely in CSS.
 
 ---
 
-## Using MySQL instead of SQLite
+## Database configuration
 
-SQLite is the default and needs no setup. To switch to MySQL, create the database, then
-edit `.env`:
+The defaults in `.env.example`:
 
 ```env
 DB_CONNECTION=mysql
@@ -179,7 +188,14 @@ DB_USERNAME=root
 DB_PASSWORD=
 ```
 
-Then run `php artisan config:clear && php artisan migrate`.
+Change these in `.env` to match your local server, then run
+`php artisan config:clear && php artisan migrate`.
+
+Seed the halls, rooms, and catering packages with `php artisan db:seed`.
+
+**Tests do not use this database.** `phpunit.xml` pins the suite to in-memory SQLite so it
+runs fast and never touches your data. CI does the same — it stands up a MySQL service
+only for the migration step, and runs the suite on SQLite.
 
 ---
 
@@ -196,8 +212,13 @@ Same cause as above — `public/build/` is gitignored, so a fresh clone always n
 **`Failed to listen on 127.0.0.1:8000 (reason: Address already in use)`**
 Something else is on that port. Use another one: `php artisan serve --port=8001`.
 
-**`SQLSTATE[HY000]: unable to open database file`**
-The SQLite file is missing. Run `touch database/database.sqlite && php artisan migrate`.
+**`SQLSTATE[HY000] [2002] Connection refused`**
+MySQL isn't running, or `.env` points at the wrong host or port. Start it
+(`sudo service mysql start`) and check `DB_HOST` / `DB_PORT`, then `php artisan config:clear`.
+
+**`SQLSTATE[HY000] [1049] Unknown database 'jehovens'`**
+The database doesn't exist yet. Create it:
+`mysql -u root -p -e "CREATE DATABASE jehovens CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"`
 
 **`No application encryption key has been specified`**
 Run `php artisan key:generate`.
