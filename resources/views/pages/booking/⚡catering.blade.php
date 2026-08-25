@@ -1,11 +1,10 @@
 <?php
 
 use App\Enums\BookingStatus;
-use App\Models\Booking;
-use App\Models\Hall;
+use App\Models\CateringOrder;
+use App\Models\CateringPackage;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -13,15 +12,13 @@ use Livewire\Component;
 
 new
 #[Layout('layouts::marketing')]
-#[Title('Book a Function Hall')]
+#[Title('Order Catering')]
 class extends Component {
-    public ?int $hall_id = null;
+    public ?int $package_id = null;
 
-    public string $booking_date = '';
+    public string $event_date = '';
 
-    public ?int $start_hour = null;
-
-    public ?int $end_hour = null;
+    public ?int $guests = null;
 
     public bool $include_skirting = true;
 
@@ -38,7 +35,7 @@ class extends Component {
     public bool $showPayment = false;
 
     /**
-     * The reference of the booking just created, which switches the page to the
+     * The reference of the order just created, which switches the page to the
      * confirmation view.
      */
     public ?string $reference = null;
@@ -55,28 +52,24 @@ class extends Component {
     }
 
     /**
-     * Validation rules for the booking form.
+     * Validation rules for the order form.
      *
      * @return array<string, mixed>
      */
     protected function rules(): array
     {
         return [
-            'hall_id' => ['required', 'integer', 'exists:halls,id'],
-            'booking_date' => ['required', 'date', 'after_or_equal:today'],
-            'start_hour' => ['required', 'integer', 'min:'.Hall::OPENS_AT, 'max:'.(Hall::CLOSES_AT - Hall::HOURS_PER_BLOCK)],
-            'end_hour' => [
+            'package_id' => ['required', 'integer', 'exists:catering_packages,id'],
+            'event_date' => ['required', 'date', 'after_or_equal:today'],
+            'guests' => [
                 'required',
                 'integer',
-                'gt:start_hour',
-                'max:'.Hall::CLOSES_AT,
+                'max:'.CateringPackage::MAX_GUESTS,
                 function (string $attribute, mixed $value, callable $fail) {
-                    if ($this->start_hour === null) {
-                        return;
-                    }
+                    $minimum = $this->package?->minimum_guests ?? 1;
 
-                    if (($value - $this->start_hour) % Hall::HOURS_PER_BLOCK !== 0) {
-                        $fail(__('Halls are rented in blocks of :hours hours, so pick 4, 8, or 12 hours.', ['hours' => Hall::HOURS_PER_BLOCK]));
+                    if ($value < $minimum) {
+                        $fail(__('This package is for a minimum of :count guests.', ['count' => $minimum]));
                     }
                 },
             ],
@@ -95,121 +88,65 @@ class extends Component {
     protected function messages(): array
     {
         return [
-            'hall_id.required' => __('Choose a function hall first.'),
-            'booking_date.after_or_equal' => __('Pick a date from today onwards.'),
-            'end_hour.gt' => __('The end time has to be after the start time.'),
+            'package_id.required' => __('Choose a catering package first.'),
+            'event_date.after_or_equal' => __('Pick an event date from today onwards.'),
+            'guests.required' => __('Tell us how many guests you are expecting.'),
             'guest_phone.regex' => __('Enter an 11-digit mobile number starting with 09, e.g. 09123456789.'),
         ];
     }
 
     /**
-     * The halls a guest can currently book.
+     * The packages a guest can currently order.
      *
-     * @return Collection<int, Hall>
+     * @return Collection<int, CateringPackage>
      */
     #[Computed]
-    public function halls(): Collection
+    public function packages(): Collection
     {
-        return Hall::query()->active()->get();
+        return CateringPackage::query()->active()->get();
     }
 
     /**
-     * The hall the guest has selected, if any.
+     * The package the guest has selected, if any.
      */
     #[Computed]
-    public function hall(): ?Hall
+    public function package(): ?CateringPackage
     {
-        return $this->hall_id ? $this->halls->firstWhere('id', $this->hall_id) : null;
+        return $this->package_id ? $this->packages->firstWhere('id', $this->package_id) : null;
     }
 
     /**
-     * The live price breakdown, once enough of the form is filled in to compute one.
+     * The live price breakdown, once a package and head count are chosen.
      *
-     * @return array{blocks: int, rent_total: int, skirting_total: int, total: int, downpayment: int, balance: int}|null
+     * @return array{catering_total: int, skirting_total: int, total: int, downpayment: int, balance: int}|null
      */
     #[Computed]
     public function quote(): ?array
     {
-        if (! $this->hall || ! $this->hours) {
+        if (! $this->package || ! $this->guests || $this->guests < 1) {
             return null;
         }
 
-        return $this->hall->quote($this->hours, $this->include_skirting);
+        return $this->package->quote($this->guests, $this->include_skirting);
     }
 
     /**
-     * The requested length of stay, or null while the time range is incomplete or invalid.
+     * The order created by this session, once payment has been acknowledged.
      */
     #[Computed]
-    public function hours(): ?int
+    public function order(): ?CateringOrder
     {
-        if ($this->start_hour === null || $this->end_hour === null) {
-            return null;
-        }
-
-        $hours = $this->end_hour - $this->start_hour;
-
-        return $hours > 0 && $hours % Hall::HOURS_PER_BLOCK === 0 ? $hours : null;
+        return $this->reference ? CateringOrder::with('package')->where('reference', $this->reference)->first() : null;
     }
 
     /**
-     * Selectable start times.
-     *
-     * @return array<int, string>
+     * Select a package, defaulting the head count to its minimum.
      */
-    #[Computed]
-    public function startHours(): array
+    public function selectPackage(int $packageId): void
     {
-        return $this->hourOptions(Hall::OPENS_AT, Hall::CLOSES_AT - Hall::HOURS_PER_BLOCK);
-    }
-
-    /**
-     * Selectable end times — always a whole number of blocks after the start time.
-     *
-     * @return array<int, string>
-     */
-    #[Computed]
-    public function endHours(): array
-    {
-        if ($this->start_hour === null) {
-            return [];
-        }
-
-        $options = [];
-
-        for ($hour = $this->start_hour + Hall::HOURS_PER_BLOCK; $hour <= Hall::CLOSES_AT; $hour += Hall::HOURS_PER_BLOCK) {
-            $options[$hour] = $this->formatHour($hour);
-        }
-
-        return $options;
-    }
-
-    /**
-     * The booking created by this session, once payment has been acknowledged.
-     */
-    #[Computed]
-    public function booking(): ?Booking
-    {
-        return $this->reference ? Booking::with('hall')->where('reference', $this->reference)->first() : null;
-    }
-
-    /**
-     * Clear the end time whenever it no longer lines up with a new start time.
-     */
-    public function updatedStartHour(): void
-    {
-        if ($this->end_hour !== null && ! array_key_exists($this->end_hour, $this->endHours)) {
-            $this->end_hour = null;
-        }
-    }
-
-    /**
-     * Select a hall.
-     */
-    public function selectHall(int $hallId): void
-    {
-        $this->hall_id = $hallId;
-        $this->resetValidation('hall_id');
+        $this->package_id = $packageId;
+        $this->guests ??= $this->package?->minimum_guests;
+        $this->resetValidation(['package_id', 'guests']);
     }
 
     /**
@@ -218,13 +155,12 @@ class extends Component {
     public function proceedToPayment(): void
     {
         $this->validate();
-        $this->assertSlotIsAvailable();
 
         $this->showPayment = true;
     }
 
     /**
-     * Close the GCash panel without booking.
+     * Close the GCash panel without ordering.
      */
     public function cancelPayment(): void
     {
@@ -232,92 +168,44 @@ class extends Component {
     }
 
     /**
-     * Record the booking as pending once the guest says the downpayment is sent.
+     * Record the order as pending once the guest says the downpayment is sent.
      */
     public function confirmPayment(): void
     {
         $validated = $this->validate();
-        $this->assertSlotIsAvailable();
+        // The form field is `package_id`; the column it maps to is `catering_package_id`.
+        unset($validated['package_id']);
 
-        $hall = $this->hall;
-        $quote = $hall->quote($this->hours, $this->include_skirting);
+        $package = $this->package;
+        $quote = $package->quote($this->guests, $this->include_skirting);
 
-        $booking = Booking::create([
+        $order = CateringOrder::create([
             ...$validated,
-            'reference' => Booking::generateReference(),
+            'catering_package_id' => $package->id,
+            'reference' => CateringOrder::generateReference(),
             'user_id' => Auth::id(),
-            'hours' => $this->hours,
-            'rent_total' => $quote['rent_total'],
-            'skirting_total' => $quote['skirting_total'],
-            'total' => $quote['total'],
-            'downpayment' => $quote['downpayment'],
-            'balance' => $quote['balance'],
+            'price_per_head' => $package->price_per_head,
+            ...$quote,
             'status' => BookingStatus::Pending,
         ]);
 
         $this->showPayment = false;
-        $this->reference = $booking->reference;
+        $this->reference = $order->reference;
     }
 
     /**
-     * Start over on a fresh booking form.
+     * Start over on a fresh order form.
      */
-    public function bookAnother(): void
+    public function orderAnother(): void
     {
-        $this->reset(['hall_id', 'booking_date', 'start_hour', 'end_hour', 'reference', 'showPayment']);
+        $this->reset(['package_id', 'event_date', 'guests', 'reference', 'showPayment']);
         $this->include_skirting = true;
         $this->mount();
-    }
-
-    /**
-     * Reject the slot if a pending or confirmed booking already overlaps it.
-     */
-    protected function assertSlotIsAvailable(): void
-    {
-        $clashes = Booking::query()
-            ->blocking()
-            ->where('hall_id', $this->hall_id)
-            ->whereDate('booking_date', $this->booking_date)
-            ->where('start_hour', '<', $this->end_hour)
-            ->where('end_hour', '>', $this->start_hour)
-            ->exists();
-
-        if ($clashes) {
-            $this->showPayment = false;
-
-            throw ValidationException::withMessages([
-                'booking_date' => __('That hall is already booked for part of this time slot. Please pick another time or date.'),
-            ]);
-        }
-    }
-
-    /**
-     * Build a list of hour => label options.
-     *
-     * @return array<int, string>
-     */
-    protected function hourOptions(int $from, int $to): array
-    {
-        $options = [];
-
-        for ($hour = $from; $hour <= $to; $hour++) {
-            $options[$hour] = $this->formatHour($hour);
-        }
-
-        return $options;
-    }
-
-    /**
-     * Render an hour on the 24-hour clock as a 12-hour label.
-     */
-    public function formatHour(int $hour): string
-    {
-        return sprintf('%d:00 %s', $hour % 12 ?: 12, $hour >= 12 ? 'PM' : 'AM');
     }
 }; ?>
 
 <div>
-    @if ($this->booking)
+    @if ($this->order)
         {{-- Confirmation --}}
         <section class="relative isolate overflow-hidden bg-white">
             <x-marketing.glow />
@@ -330,24 +218,25 @@ class extends Component {
                         </svg>
                     </div>
 
-                    <h1 class="mt-6 text-3xl font-bold tracking-tight text-zinc-900">{{ __('Booking received') }}</h1>
+                    <h1 class="mt-6 text-3xl font-bold tracking-tight text-zinc-900">{{ __('Order received') }}</h1>
 
                     <p class="mt-3 text-zinc-600">
                         {{ __('We are verifying your downpayment. You will get a confirmation once it clears — usually within 24 hours.') }}
                     </p>
 
+                    @php $order = $this->order; @endphp
+
                     <dl class="mt-8 divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
                         @php
-                            $booking = $this->booking;
                             $rows = [
-                                __('Reference') => $booking->reference,
-                                __('Hall') => $booking->hall->name,
-                                __('Date') => $booking->booking_date->format('F j, Y'),
-                                __('Time') => $this->formatHour($booking->start_hour).' – '.$this->formatHour($booking->end_hour).' ('.trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours]).')',
-                                __('Name') => $booking->guest_name,
-                                __('Phone') => $booking->guest_phone,
-                                __('Email') => $booking->guest_email,
-                                __('Skirting') => $booking->include_skirting ? __('Included') : __('Not included'),
+                                __('Reference') => $order->reference,
+                                __('Package') => $order->package->name,
+                                __('Event date') => $order->event_date->format('F j, Y'),
+                                __('Guests') => number_format($order->guests),
+                                __('Name') => $order->guest_name,
+                                __('Phone') => $order->guest_phone,
+                                __('Email') => $order->guest_email,
+                                __('Skirting') => $order->include_skirting ? __('Included') : __('Not included'),
                             ];
                         @endphp
 
@@ -359,28 +248,35 @@ class extends Component {
                         @endforeach
 
                         <div class="flex justify-between gap-6 py-3">
+                            <dt class="text-zinc-500">
+                                {{ __('Catering (₱:rate × :guests)', ['rate' => number_format($order->price_per_head), 'guests' => number_format($order->guests)]) }}
+                            </dt>
+                            <dd class="text-right font-medium text-zinc-900">₱{{ number_format($order->catering_total) }}</dd>
+                        </div>
+
+                        <div class="flex justify-between gap-6 py-3">
                             <dt class="text-zinc-500">{{ __('Total') }}</dt>
-                            <dd class="text-right font-medium text-zinc-900">₱{{ number_format($booking->total) }}</dd>
+                            <dd class="text-right font-medium text-zinc-900">₱{{ number_format($order->total) }}</dd>
                         </div>
 
                         <div class="flex justify-between gap-6 py-3">
                             <dt class="text-zinc-500">{{ __('Downpayment sent') }}</dt>
-                            <dd class="text-right font-semibold text-brand-700">₱{{ number_format($booking->downpayment) }}</dd>
+                            <dd class="text-right font-semibold text-brand-700">₱{{ number_format($order->downpayment) }}</dd>
                         </div>
 
                         <div class="flex justify-between gap-6 py-3">
-                            <dt class="text-zinc-500">{{ __('Balance on arrival') }}</dt>
-                            <dd class="text-right font-medium text-zinc-900">₱{{ number_format($booking->balance) }}</dd>
+                            <dt class="text-zinc-500">{{ __('Balance on the day') }}</dt>
+                            <dd class="text-right font-medium text-zinc-900">₱{{ number_format($order->balance) }}</dd>
                         </div>
                     </dl>
 
                     <div class="mt-8 flex flex-wrap gap-3">
                         <button
                             type="button"
-                            wire:click="bookAnother"
+                            wire:click="orderAnother"
                             class="rounded-xl bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700"
                         >
-                            {{ __('Book another hall') }}
+                            {{ __('Place another order') }}
                         </button>
 
                         <a
@@ -399,119 +295,114 @@ class extends Component {
             <x-marketing.glow />
 
             <div class="relative mx-auto max-w-3xl px-4 pb-10 pt-14 text-center sm:px-6 lg:px-8 lg:pt-20">
-                <p class="text-sm font-semibold uppercase tracking-wider text-brand-600">{{ __('Function halls') }}</p>
+                <p class="text-sm font-semibold uppercase tracking-wider text-brand-600">{{ __('Catering') }}</p>
 
                 <h1 class="mt-3 text-4xl font-bold tracking-tight text-balance text-zinc-900 sm:text-5xl">
-                    {{ __('Book a function hall') }}
+                    {{ __('Order catering services') }}
                 </h1>
 
                 <p class="mx-auto mt-5 max-w-2xl text-lg/8 text-pretty text-zinc-600">
-                    {{ __('Pick your venue and time between 7:00 AM and 10:00 PM, then hold the date with a 50% downpayment.') }}
+                    {{ __('Pick a package, tell us your event date and head count, then hold it with a 50% downpayment.') }}
                 </p>
             </div>
         </section>
 
         <section class="bg-zinc-50 pb-20 pt-10 lg:pb-28">
             <div class="mx-auto grid max-w-7xl gap-6 px-4 sm:px-6 lg:grid-cols-[1.15fr_1fr] lg:items-start lg:gap-8 lg:px-8">
-                {{-- Hall picker --}}
+                {{-- Package picker --}}
                 <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-                    <h2 class="text-lg font-semibold text-zinc-900">{{ __('Select a function hall') }}</h2>
+                    <h2 class="text-lg font-semibold text-zinc-900">{{ __('Select a catering package') }}</h2>
 
-                    <div class="mt-6 space-y-4" role="radiogroup" aria-label="{{ __('Function halls') }}">
-                        @foreach ($this->halls as $hall)
-                            <button
-                                type="button"
-                                wire:key="hall-{{ $hall->id }}"
-                                wire:click="selectHall({{ $hall->id }})"
-                                role="radio"
-                                aria-checked="{{ $hall_id === $hall->id ? 'true' : 'false' }}"
-                                @class([
-                                    'w-full rounded-2xl border p-5 text-left transition',
-                                    'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500' => $hall_id === $hall->id,
-                                    'border-zinc-200 bg-white hover:border-brand-300 hover:bg-zinc-50' => $hall_id !== $hall->id,
-                                ])
-                            >
-                                <div class="flex items-start justify-between gap-4">
-                                    <div class="min-w-0">
-                                        <h3 class="text-lg font-semibold text-zinc-900">{{ $hall->name }}</h3>
-                                        <p class="mt-1.5 text-sm/6 text-zinc-600">{{ $hall->description }}</p>
+                    @if ($this->packages->isEmpty())
+                        <p class="mt-6 rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500">
+                            {{ __('No catering packages are available right now. Please check back later.') }}
+                        </p>
+                    @else
+                        <div class="mt-6 space-y-4" role="radiogroup" aria-label="{{ __('Catering packages') }}">
+                            @foreach ($this->packages as $package)
+                                <button
+                                    type="button"
+                                    wire:key="package-{{ $package->id }}"
+                                    wire:click="selectPackage({{ $package->id }})"
+                                    role="radio"
+                                    aria-checked="{{ $package_id === $package->id ? 'true' : 'false' }}"
+                                    @class([
+                                        'w-full rounded-2xl border p-5 text-left transition',
+                                        'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500' => $package_id === $package->id,
+                                        'border-zinc-200 bg-white hover:border-brand-300 hover:bg-zinc-50' => $package_id !== $package->id,
+                                    ])
+                                >
+                                    <div class="flex items-start justify-between gap-4">
+                                        <div class="min-w-0">
+                                            <h3 class="text-lg font-semibold text-zinc-900">{{ $package->name }}</h3>
+                                            <p class="mt-1.5 text-sm/6 text-zinc-600">{{ $package->description }}</p>
+                                        </div>
+
+                                        <span @class([
+                                            'mt-1 flex size-5 shrink-0 items-center justify-center rounded-full border-2',
+                                            'border-brand-600 bg-brand-600 text-white' => $package_id === $package->id,
+                                            'border-zinc-300' => $package_id !== $package->id,
+                                        ])>
+                                            @if ($package_id === $package->id)
+                                                <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.5 4.5L19 7.5" />
+                                                </svg>
+                                            @endif
+                                        </span>
                                     </div>
 
-                                    <span @class([
-                                        'mt-1 flex size-5 shrink-0 items-center justify-center rounded-full border-2',
-                                        'border-brand-600 bg-brand-600 text-white' => $hall_id === $hall->id,
-                                        'border-zinc-300' => $hall_id !== $hall->id,
-                                    ])>
-                                        @if ($hall_id === $hall->id)
-                                            <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true">
-                                                <path stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.5 4.5L19 7.5" />
-                                            </svg>
-                                        @endif
-                                    </span>
-                                </div>
+                                    <div class="mt-4 flex flex-wrap gap-2 border-t border-zinc-200 pt-4">
+                                        <span class="rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white">
+                                            {{ __('₱:price per head', ['price' => number_format($package->price_per_head)]) }}
+                                        </span>
+                                        <span class="rounded-full bg-coral-500 px-3 py-1.5 text-xs font-semibold text-white">
+                                            {{ __('Skirting: ₱:price', ['price' => number_format($package->skirting_price)]) }}
+                                        </span>
+                                        <span class="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-600">
+                                            {{ __('Min. :count guests', ['count' => number_format($package->minimum_guests)]) }}
+                                        </span>
+                                    </div>
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
 
-                                <div class="mt-4 flex flex-wrap gap-2 border-t border-zinc-200 pt-4">
-                                    <span class="rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white">
-                                        {{ __('Rent: ₱:price / :hours hours', ['price' => number_format($hall->rent_price), 'hours' => \App\Models\Hall::HOURS_PER_BLOCK]) }}
-                                    </span>
-                                    <span class="rounded-full bg-coral-500 px-3 py-1.5 text-xs font-semibold text-white">
-                                        {{ __('Skirting: ₱:price', ['price' => number_format($hall->skirting_price)]) }}
-                                    </span>
-                                    <span class="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-600">
-                                        {{ trans_choice('{1} :count guest|[2,*] up to :count guests', $hall->capacity, ['count' => number_format($hall->capacity)]) }}
-                                    </span>
-                                </div>
-                            </button>
-                        @endforeach
-                    </div>
-
-                    @error('hall_id')
+                    @error('package_id')
                         <p class="mt-4 text-sm font-medium text-red-600">{{ $message }}</p>
                     @enderror
                 </div>
 
-                {{-- Booking details --}}
+                {{-- Order details --}}
                 <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-                    <h2 class="text-lg font-semibold text-zinc-900">{{ __('Booking details') }}</h2>
+                    <h2 class="text-lg font-semibold text-zinc-900">{{ __('Order details') }}</h2>
 
                     <form wire:submit="proceedToPayment" class="mt-6 space-y-6">
                         <flux:input
-                            wire:model.live="booking_date"
-                            :label="__('Select date')"
+                            wire:model.live="event_date"
+                            :label="__('Event date')"
                             type="date"
                             :min="now()->toDateString()"
                             required
                         />
 
-                        <div>
-                            <div class="grid gap-4 sm:grid-cols-2">
-                                <flux:select wire:model.live="start_hour" :label="__('Start time')" :placeholder="__('Select start time')">
-                                    @foreach ($this->startHours as $hour => $label)
-                                        <flux:select.option wire:key="start-{{ $hour }}" :value="$hour">{{ $label }}</flux:select.option>
-                                    @endforeach
-                                </flux:select>
-
-                                <flux:select
-                                    wire:model.live="end_hour"
-                                    :label="__('End time')"
-                                    :placeholder="$start_hour === null ? __('Pick a start time first') : __('Select end time')"
-                                    :disabled="$start_hour === null"
-                                >
-                                    @foreach ($this->endHours as $hour => $label)
-                                        <flux:select.option wire:key="end-{{ $hour }}" :value="$hour">{{ $label }}</flux:select.option>
-                                    @endforeach
-                                </flux:select>
-                            </div>
-
-                            <p class="mt-2 text-xs text-zinc-500">
-                                {{ __('Open 7:00 AM to 10:00 PM. Halls are rented in blocks of 4 hours.') }}
-                            </p>
-                        </div>
+                        <flux:input
+                            wire:model.live.debounce.400ms="guests"
+                            :label="__('Number of guests')"
+                            type="number"
+                            inputmode="numeric"
+                            min="1"
+                            :max="\App\Models\CateringPackage::MAX_GUESTS"
+                            :placeholder="__('e.g. 80')"
+                            :description="$this->package ? __('This package is for a minimum of :count guests.', ['count' => number_format($this->package->minimum_guests)]) : null"
+                            required
+                        />
 
                         <flux:switch
                             wire:model.live="include_skirting"
                             :label="__('Include skirting')"
-                            :description="__('One-time skirting and setup fee.')"
+                            :description="$this->package
+                                ? __('One-time skirting and setup fee (₱:price).', ['price' => number_format($this->package->skirting_price)])
+                                : __('One-time skirting and setup fee.')"
                         />
 
                         <flux:separator variant="subtle" />
@@ -537,12 +428,12 @@ class extends Component {
                                 <dl class="mt-4 space-y-2.5 text-sm">
                                     <div class="flex justify-between gap-4">
                                         <dt class="text-zinc-600">
-                                            {{ __('Rent (₱:rate × :blocks)', [
-                                                'rate' => number_format($this->hall->rent_price),
-                                                'blocks' => trans_choice('{1} :count block|[2,*] :count blocks', $this->quote['blocks'], ['count' => $this->quote['blocks']]),
+                                            {{ __('Catering (₱:rate × :guests)', [
+                                                'rate' => number_format($this->package->price_per_head),
+                                                'guests' => trans_choice('{1} :count guest|[2,*] :count guests', $guests, ['count' => number_format($guests)]),
                                             ]) }}
                                         </dt>
-                                        <dd class="font-medium text-zinc-900">₱{{ number_format($this->quote['rent_total']) }}</dd>
+                                        <dd class="font-medium text-zinc-900">₱{{ number_format($this->quote['catering_total']) }}</dd>
                                     </div>
 
                                     @if ($this->quote['skirting_total'] > 0)
@@ -563,7 +454,7 @@ class extends Component {
                                     </div>
 
                                     <div class="flex justify-between gap-4">
-                                        <dt class="text-zinc-600">{{ __('Balance on arrival') }}</dt>
+                                        <dt class="text-zinc-600">{{ __('Balance on the day') }}</dt>
                                         <dd class="font-medium text-zinc-900">₱{{ number_format($this->quote['balance']) }}</dd>
                                     </div>
                                 </dl>
@@ -576,7 +467,7 @@ class extends Component {
                             wire:loading.attr="disabled"
                         >
                             <span wire:loading.remove wire:target="proceedToPayment">{{ __('Proceed to payment') }}</span>
-                            <span wire:loading wire:target="proceedToPayment">{{ __('Checking availability…') }}</span>
+                            <span wire:loading wire:target="proceedToPayment">{{ __('Checking your order…') }}</span>
                         </button>
                     </form>
                 </div>
@@ -638,7 +529,7 @@ class extends Component {
                         wire:target="confirmPayment"
                     >
                         <span wire:loading.remove wire:target="confirmPayment">{{ __('I have sent the payment') }}</span>
-                        <span wire:loading wire:target="confirmPayment">{{ __('Saving your booking…') }}</span>
+                        <span wire:loading wire:target="confirmPayment">{{ __('Saving your order…') }}</span>
                     </button>
 
                     <button

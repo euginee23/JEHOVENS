@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             HallSeeder::class,
             RoomSeeder::class,
+            CateringPackageSeeder::class,
         ]);
 
         User::factory()->create([

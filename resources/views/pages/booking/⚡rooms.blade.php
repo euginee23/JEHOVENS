@@ -412,7 +412,7 @@ class extends Component {
         <section class="bg-zinc-50 pb-20 pt-10 lg:pb-28">
             <div class="mx-auto grid max-w-7xl gap-6 px-4 sm:px-6 lg:grid-cols-[1.15fr_1fr] lg:items-start lg:gap-8 lg:px-8">
                 {{-- Room picker --}}
-                <div class="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
+                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
                     <h2 class="text-lg font-semibold text-zinc-900">{{ __('Select a room') }}</h2>
 
                     @if ($this->rooms->isEmpty())
@@ -473,7 +473,7 @@ class extends Component {
                 </div>
 
                 {{-- Booking details --}}
-                <div class="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
+                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
                     <h2 class="text-lg font-semibold text-zinc-900">{{ __('Booking details') }}</h2>
 
                     <form wire:submit="proceedToPayment" class="mt-6 space-y-6">
@@ -582,7 +582,7 @@ class extends Component {
         {{-- GCash panel --}}
         @if ($showPayment && $this->quote)
             <div
-                class="fixed inset-0 z-[60] flex items-end justify-center bg-zinc-900/60 p-4 backdrop-blur-sm sm:items-center"
+                class="fixed inset-0 z-60 flex items-end justify-center bg-zinc-900/60 p-4 backdrop-blur-sm sm:items-center"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="payment-title"

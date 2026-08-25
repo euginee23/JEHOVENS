@@ -242,7 +242,7 @@
                         __('QR code food ordering coming soon'),
                     ]"
                     :cta="__('Order catering')"
-                    :href="auth()->check() ? route('dashboard') : route('register')"
+                    :href="route('booking.catering')"
                 >
                     {{ __('Food packages prepared on-site so your guests never have to leave the party.') }}
                 </x-marketing.offer-card>
@@ -251,7 +251,9 @@
     </section>
 
     {{-- Discover --}}
-    <section id="about" class="scroll-mt-20 bg-white py-20 lg:py-28">
+    {{-- `overflow-hidden` clips the decorative blur behind the photo, which otherwise
+         pushes the page wider than the viewport on small screens. --}}
+    <section id="about" class="scroll-mt-20 overflow-hidden bg-white py-20 lg:py-28">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
                 <div class="relative">
