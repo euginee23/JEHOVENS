@@ -71,7 +71,7 @@ class extends Component {
 
         return Booking::query()->blocking()->whereBetween('booking_date', [$from, $until])->count()
             + RoomBooking::query()->blocking()->whereBetween('starts_at', [$from, $until])->count()
-            + CateringOrder::query()->active()->whereBetween('event_date', [$from, $until])->count();
+            + CateringOrder::query()->blocking()->whereBetween('event_date', [$from, $until])->count();
     }
 
     /**

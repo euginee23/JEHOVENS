@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasPhotos;
+use App\Models\Contracts\Photographable;
 use Database\Factories\RoomFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -22,12 +24,16 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Collection<int, RoomRate> $rates
+ * @property-read Collection<int, RoomPhoto> $photos
  */
 #[Fillable(['name', 'slug', 'description', 'is_active', 'sort_order'])]
-class Room extends Model
+class Room extends Model implements Photographable
 {
-    /** @use HasFactory<RoomFactory> */
-    use HasFactory;
+    /**
+     * @use HasFactory<RoomFactory>
+     * @use HasPhotos<RoomPhoto>
+     */
+    use HasFactory, HasPhotos;
 
     /**
      * Earliest hour of the day a guest may check in (24-hour clock).
@@ -48,6 +54,16 @@ class Room extends Model
      * The share of the total a guest pays up front when not paying in full.
      */
     public const DOWNPAYMENT_RATE = 0.5;
+
+    /**
+     * This type keeps its photos in its own table.
+     *
+     * @return class-string<RoomPhoto>
+     */
+    public function photoModel(): string
+    {
+        return RoomPhoto::class;
+    }
 
     /**
      * Get the attributes that should be cast.

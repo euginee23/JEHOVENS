@@ -3,7 +3,9 @@
 namespace Database\Seeders;
 
 use App\Models\CateringPackage;
+use App\Support\PhotoStore;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Storage;
 
 class CateringPackageSeeder extends Seeder
 {
@@ -48,5 +50,30 @@ class CateringPackageSeeder extends Seeder
         foreach ($packages as $package) {
             CateringPackage::updateOrCreate(['slug' => $package['slug']], $package);
         }
+
+        $this->attachSeedPhoto();
+    }
+
+    /**
+     * Give the first record the bundled photo, so a fresh install is not empty.
+     */
+    private function attachSeedPhoto(): void
+    {
+        $record = CateringPackage::query()->orderBy('sort_order')->first();
+        $source = public_path('images/catering/catering-1.jpg');
+
+        if (! $record || $record->photos()->exists() || ! is_file($source)) {
+            return;
+        }
+
+        $path = 'catering/seed-'.$record->slug.'.jpg';
+
+        Storage::disk(PhotoStore::DISK)->put($path, (string) file_get_contents($source));
+
+        $record->photos()->create([
+            'path' => $path,
+            'alt' => __(':name at Jehoven\'s Garden Resort', ['name' => $record->name]),
+            'sort_order' => 1,
+        ]);
     }
 }

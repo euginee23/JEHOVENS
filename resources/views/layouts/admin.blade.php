@@ -7,6 +7,10 @@
 @php
     $links = [
         ['label' => __('Dashboard'), 'route' => 'admin.dashboard'],
+        ['label' => __('Function halls'), 'route' => 'admin.function-halls'],
+        ['label' => __('Rooms'), 'route' => 'admin.rooms'],
+        ['label' => __('Catering'), 'route' => 'admin.catering'],
+        ['label' => __('Bookings'), 'route' => 'admin.bookings'],
         ['label' => __('Settings'), 'route' => 'profile.edit'],
     ];
 @endphp

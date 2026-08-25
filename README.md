@@ -56,16 +56,17 @@ for what it runs and how to do it by hand.
 
 ## What `composer setup` does
 
-It runs these six steps in order:
+It runs these seven steps in order:
 
 1. `composer install` — installs PHP dependencies into `vendor/`
 2. Copies `.env.example` to `.env` (skipped if `.env` already exists)
 3. `php artisan key:generate` — writes a fresh `APP_KEY`
 4. `php artisan migrate --force` — creates the tables in your `jehovens` database
-5. `npm install` — installs JS dependencies into `node_modules/`
-6. `npm run build` — compiles CSS/JS into `public/build/`
+5. `php artisan storage:link` — links `public/storage` for uploaded photos
+6. `npm install` — installs JS dependencies into `node_modules/`
+7. `npm run build` — compiles CSS/JS into `public/build/`
 
-Steps 4–6 are the ones that matter after pulling changes; see
+Steps 4–7 are the ones that matter after pulling changes; see
 [Pulling updates](#pulling-updates).
 
 ### Doing it manually
@@ -249,6 +250,10 @@ verification link.
 | URL | What it is |
 | --- | --- |
 | `/admin` | Dashboard — live reservation figures (redirects to the login when signed out) |
+| `/admin/function-halls` | Add, edit, show/hide halls and their pricing |
+| `/admin/rooms` | Add, edit, show/hide rooms; rate cards and photos |
+| `/admin/catering` | Add, edit, show/hide packages; per-head pricing and photos |
+| `/admin/bookings` | Hall, room, and catering reservations — confirm, complete, cancel, record balances |
 | `/admin/login` | Staff sign-in |
 | `/admin/forgot-password` | Password reset request |
 | `/admin/settings/profile` | Name and email |
@@ -258,8 +263,36 @@ verification link.
 
 The dashboard is read-only: it shows counts of reservations awaiting payment, bookings made
 this week, confirmed revenue for the month, and what is coming up in the next seven days,
-plus the newest reservations across all three types. Confirming a downpayment still means
-updating the row's `status` in the database.
+plus the newest reservations across all three types.
+
+**Function hall bookings move through four states**, and the admin can only make the moves
+that make sense from where a booking currently is:
+
+```
+pending ──▶ confirmed ──▶ completed
+   │            │
+   └──▶ cancelled ◀──┘        cancelled ──▶ pending
+```
+
+Marking a booking *completed* also records its remaining balance as settled, since the
+balance is collected on the day. There is a separate "Balance paid" action for confirmed
+bookings whose balance came in early.
+
+Halls are **hidden, never deleted** — the `bookings.hall_id` foreign key uses
+`restrictOnDelete`, so the database itself refuses to drop a hall that has bookings and
+take its payment history with it.
+
+Halls, rooms, and catering packages each take up to six photos, uploaded through their
+admin screen and shown on the matching public booking page. They are
+**resized to 1600px wide on upload** (see `App\Support\PhotoStore`), because a phone photo
+is routinely 4000px and several megabytes. Up to six photos per room; the first one leads.
+
+Uploads live on the `public` disk, so **`php artisan storage:link` must have run** — it is
+part of `composer setup`, but `public/storage` is gitignored so it is needed on every
+machine and on the server.
+
+All three booking types now have a management screen, and the bookings queue covers all
+three behind its tabs.
 
 ---
 

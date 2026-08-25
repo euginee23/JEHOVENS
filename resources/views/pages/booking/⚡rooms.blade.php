@@ -111,7 +111,7 @@ class extends Component {
     #[Computed]
     public function rooms(): Collection
     {
-        return Room::query()->active()->with('rates')->get();
+        return Room::query()->active()->with(['rates', 'photos'])->get();
     }
 
     /**
@@ -434,6 +434,17 @@ class extends Component {
                                         'border-zinc-200 bg-white hover:border-brand-300 hover:bg-zinc-50' => $room_id !== $room->id,
                                     ])
                                 >
+                                    @if ($room->photos->isNotEmpty())
+                                        {{-- No dots: this card is a <button>, and nested
+                                             interactive elements would both be invalid HTML
+                                             and steal the click that selects the room. --}}
+                                        <x-marketing.photo-slideshow
+                                            :photos="$room->photos->map(fn ($photo) => ['url' => $photo->url(), 'alt' => $photo->alt, 'width' => 1600, 'height' => 1200])->all()"
+                                            :dots="false"
+                                            class="mb-4 aspect-3/2 rounded-xl"
+                                        />
+                                    @endif
+
                                     <div class="flex items-start justify-between gap-4">
                                         <div class="min-w-0">
                                             <h3 class="text-lg font-semibold text-zinc-900">{{ $room->name }}</h3>

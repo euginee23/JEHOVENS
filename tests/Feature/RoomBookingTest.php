@@ -3,6 +3,7 @@
 use App\Enums\BookingStatus;
 use App\Models\Room;
 use App\Models\RoomBooking;
+use App\Models\RoomPhoto;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Livewire\Features\SupportTesting\Testable;
@@ -256,4 +257,42 @@ test('another room is still free at the same time', function () {
         ->assertHasNoErrors();
 
     expect(RoomBooking::count())->toBe(2);
+});
+
+test('a room with photos shows them on the booking page', function () {
+    $room = Room::factory()->withRates()->create(['name' => 'Photographed Room']);
+
+    RoomPhoto::factory()->count(2)->for($room)->sequence(
+        ['path' => 'rooms/first.jpg'],
+        ['path' => 'rooms/second.jpg'],
+    )->create();
+
+    $html = $this->get(route('booking.rooms'))->assertOk()->getContent();
+
+    expect($html)->toContain('rooms/first.jpg')
+        ->and($html)->toContain('rooms/second.jpg');
+});
+
+test('a room card crossfades but never renders dots', function () {
+    // The card is a <button>; dots inside it would be nested interactive elements and
+    // would steal the click that selects the room.
+    $room = Room::factory()->withRates()->create();
+    RoomPhoto::factory()->count(3)->for($room)->create();
+
+    $html = $this->get(route('booking.rooms'))->getContent();
+
+    $card = str($html)->after('wire:key="room-'.$room->id.'"')->before('</button>')->toString();
+
+    expect($card)->toContain('x-data')
+        ->and($card)->toContain('setInterval')
+        ->and($card)->not->toContain('Show photo')   // the dots' screen-reader label
+        ->and($card)->not->toContain('<button');     // no nested button of any kind
+});
+
+test('a room without photos still renders its card', function () {
+    Room::factory()->withRates()->create(['name' => 'Plain Room']);
+
+    $this->get(route('booking.rooms'))
+        ->assertOk()
+        ->assertSee('Plain Room');
 });

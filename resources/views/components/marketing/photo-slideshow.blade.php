@@ -26,8 +26,9 @@
 >
     @foreach ($photos as $index => $photo)
         <img
-            {{-- `file` is a path under public/images, e.g. "rooms/room-1.jpg". --}}
-            src="{{ asset('images/'.$photo['file']) }}"
+            {{-- `url` for an already-resolved URL (uploaded photos on the public disk),
+                 otherwise `file` as a path under public/images, e.g. "rooms/room-1.jpg". --}}
+            src="{{ $photo['url'] ?? asset('images/'.$photo['file']) }}"
             alt="{{ $photo['alt'] }}"
             width="{{ $photo['width'] }}"
             height="{{ $photo['height'] }}"

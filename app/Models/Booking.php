@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Enums\BookingStatus;
+use App\Models\Concerns\ManagesReservationLifecycle;
+use Carbon\CarbonInterface;
 use Database\Factories\BookingFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -31,7 +33,9 @@ use Illuminate\Support\Str;
  * @property int $total
  * @property int $downpayment
  * @property int $balance
+ * @property CarbonInterface|null $balance_settled_at
  * @property BookingStatus $status
+ * @property string|null $admin_note
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Hall $hall
@@ -41,11 +45,12 @@ use Illuminate\Support\Str;
     'reference', 'hall_id', 'user_id', 'guest_name', 'guest_phone', 'guest_email',
     'booking_date', 'start_hour', 'end_hour', 'hours', 'include_skirting',
     'rent_total', 'skirting_total', 'total', 'downpayment', 'balance', 'status',
+    'balance_settled_at', 'admin_note',
 ])]
 class Booking extends Model
 {
     /** @use HasFactory<BookingFactory> */
-    use HasFactory;
+    use HasFactory, ManagesReservationLifecycle;
 
     /**
      * Get the attributes that should be cast.
@@ -65,6 +70,7 @@ class Booking extends Model
             'total' => 'integer',
             'downpayment' => 'integer',
             'balance' => 'integer',
+            'balance_settled_at' => 'datetime',
             'status' => BookingStatus::class,
         ];
     }
@@ -98,6 +104,14 @@ class Booking extends Model
     protected function blocking(Builder $query): void
     {
         $query->whereIn('status', BookingStatus::blocking());
+    }
+
+    /**
+     * Halls record what the guest paid as the downpayment.
+     */
+    public function amountPaidColumn(): string
+    {
+        return 'downpayment';
     }
 
     /**

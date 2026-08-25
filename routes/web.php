@@ -27,6 +27,11 @@ Route::livewire('book/catering', 'pages::booking.catering')->name('booking.cater
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('admin', 'pages::admin.dashboard')->name('admin.dashboard');
+
+    Route::livewire('admin/function-halls', 'pages::admin.function-halls')->name('admin.function-halls');
+    Route::livewire('admin/rooms', 'pages::admin.rooms')->name('admin.rooms');
+    Route::livewire('admin/catering', 'pages::admin.catering')->name('admin.catering');
+    Route::livewire('admin/bookings', 'pages::admin.bookings')->name('admin.bookings');
 });
 
 /*
@@ -36,6 +41,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 */
 
 Route::redirect('dashboard', 'admin');
+// Leading slash matters: a relative destination resolves against the source path, which
+// would send this to /admin/function-halls/admin/bookings.
+Route::redirect('admin/function-halls/bookings', '/admin/bookings?type=halls');
 Route::redirect('settings', 'admin/settings');
 
 require __DIR__.'/settings.php';

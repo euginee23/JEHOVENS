@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasPhotos;
+use App\Models\Contracts\Photographable;
 use Database\Factories\HallFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -25,10 +27,13 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  */
 #[Fillable(['name', 'slug', 'description', 'capacity', 'rent_price', 'skirting_price', 'is_active', 'sort_order'])]
-class Hall extends Model
+class Hall extends Model implements Photographable
 {
-    /** @use HasFactory<HallFactory> */
-    use HasFactory;
+    /**
+     * @use HasFactory<HallFactory>
+     * @use HasPhotos<HallPhoto>
+     */
+    use HasFactory, HasPhotos;
 
     /**
      * The resort rents halls in blocks of this many hours.
@@ -49,6 +54,16 @@ class Hall extends Model
      * The share of the total a guest pays up front to hold the date.
      */
     public const DOWNPAYMENT_RATE = 0.5;
+
+    /**
+     * This type keeps its photos in its own table.
+     *
+     * @return class-string<HallPhoto>
+     */
+    public function photoModel(): string
+    {
+        return HallPhoto::class;
+    }
 
     /**
      * Get the attributes that should be cast.

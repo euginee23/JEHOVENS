@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasPhotos;
+use App\Models\Contracts\Photographable;
 use Database\Factories\CateringPackageFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -25,10 +27,13 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  */
 #[Fillable(['name', 'slug', 'description', 'price_per_head', 'skirting_price', 'minimum_guests', 'is_active', 'sort_order'])]
-class CateringPackage extends Model
+class CateringPackage extends Model implements Photographable
 {
-    /** @use HasFactory<CateringPackageFactory> */
-    use HasFactory;
+    /**
+     * @use HasFactory<CateringPackageFactory>
+     * @use HasPhotos<CateringPackagePhoto>
+     */
+    use HasFactory, HasPhotos;
 
     /**
      * The share of the total a guest pays up front to hold the date.
@@ -39,6 +44,16 @@ class CateringPackage extends Model
      * The most guests a single order can be placed for.
      */
     public const MAX_GUESTS = 1000;
+
+    /**
+     * This type keeps its photos in its own table.
+     *
+     * @return class-string<CateringPackagePhoto>
+     */
+    public function photoModel(): string
+    {
+        return CateringPackagePhoto::class;
+    }
 
     /**
      * Get the attributes that should be cast.

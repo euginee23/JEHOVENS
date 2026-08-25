@@ -110,7 +110,7 @@ class extends Component {
     #[Computed]
     public function halls(): Collection
     {
-        return Hall::query()->active()->get();
+        return Hall::query()->active()->with('photos')->get();
     }
 
     /**
@@ -436,6 +436,17 @@ class extends Component {
                                         'border-zinc-200 bg-white hover:border-brand-300 hover:bg-zinc-50' => $hall_id !== $hall->id,
                                     ])
                                 >
+                                        @if ($hall->photos->isNotEmpty())
+                                            {{-- No dots: this card is a <button>, and nested
+                                                 interactive elements would both be invalid HTML
+                                                 and steal the click that selects the hall. --}}
+                                            <x-marketing.photo-slideshow
+                                                :photos="$hall->photoSlides()"
+                                                :dots="false"
+                                                class="mb-4 aspect-3/2 rounded-xl"
+                                            />
+                                        @endif
+
                                     <div class="flex items-start justify-between gap-4">
                                         <div class="min-w-0">
                                             <h3 class="text-lg font-semibold text-zinc-900">{{ $hall->name }}</h3>

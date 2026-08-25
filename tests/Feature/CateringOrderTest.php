@@ -3,6 +3,7 @@
 use App\Enums\BookingStatus;
 use App\Models\CateringOrder;
 use App\Models\CateringPackage;
+use App\Models\CateringPackagePhoto;
 use App\Models\User;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
@@ -214,4 +215,30 @@ test('two orders can share the same event date', function () {
         ->assertHasNoErrors();
 
     expect(CateringOrder::count())->toBe(2);
+});
+
+test('a package with photos shows them on the ordering page without dots', function () {
+    $package = CateringPackage::factory()->create(['name' => 'Photographed Package']);
+
+    CateringPackagePhoto::factory()->count(2)->for($package)->sequence(
+        ['path' => 'catering/one.jpg'],
+        ['path' => 'catering/two.jpg'],
+    )->create();
+
+    $html = $this->get(route('booking.catering'))->assertOk()->getContent();
+
+    expect($html)->toContain('catering/one.jpg')
+        ->and($html)->toContain('catering/two.jpg');
+
+    $card = str($html)->after('wire:key="package-'.$package->id.'"')->before('</button>')->toString();
+
+    expect($card)->toContain('x-data')
+        ->and($card)->not->toContain('Show photo')
+        ->and($card)->not->toContain('<button');
+});
+
+test('a package without photos still renders its card', function () {
+    CateringPackage::factory()->create(['name' => 'Plain Package']);
+
+    $this->get(route('booking.catering'))->assertOk()->assertSee('Plain Package');
 });

@@ -3,7 +3,9 @@
 namespace Database\Seeders;
 
 use App\Models\Hall;
+use App\Support\PhotoStore;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Storage;
 
 class HallSeeder extends Seeder
 {
@@ -45,5 +47,30 @@ class HallSeeder extends Seeder
         foreach ($halls as $hall) {
             Hall::updateOrCreate(['slug' => $hall['slug']], $hall);
         }
+
+        $this->attachSeedPhoto();
+    }
+
+    /**
+     * Give the first record the bundled photo, so a fresh install is not empty.
+     */
+    private function attachSeedPhoto(): void
+    {
+        $record = Hall::query()->orderBy('sort_order')->first();
+        $source = public_path('images/function-hall/function-hall-1.jpg');
+
+        if (! $record || $record->photos()->exists() || ! is_file($source)) {
+            return;
+        }
+
+        $path = 'function-hall/seed-'.$record->slug.'.jpg';
+
+        Storage::disk(PhotoStore::DISK)->put($path, (string) file_get_contents($source));
+
+        $record->photos()->create([
+            'path' => $path,
+            'alt' => __(':name at Jehoven\'s Garden Resort', ['name' => $record->name]),
+            'sort_order' => 1,
+        ]);
     }
 }

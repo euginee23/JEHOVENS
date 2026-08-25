@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\BookingStatus;
+use App\Models\Concerns\ManagesReservationLifecycle;
 use Carbon\CarbonInterface;
 use Database\Factories\RoomBookingFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -29,7 +30,9 @@ use Illuminate\Support\Str;
  * @property int $total
  * @property int $amount_paid
  * @property int $balance
+ * @property CarbonInterface|null $balance_settled_at
  * @property BookingStatus $status
+ * @property string|null $admin_note
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Room $room
@@ -38,11 +41,12 @@ use Illuminate\Support\Str;
 #[Fillable([
     'reference', 'room_id', 'user_id', 'guest_name', 'guest_phone', 'guest_email',
     'starts_at', 'ends_at', 'hours', 'pay_in_full', 'total', 'amount_paid', 'balance', 'status',
+    'balance_settled_at', 'admin_note',
 ])]
 class RoomBooking extends Model
 {
     /** @use HasFactory<RoomBookingFactory> */
-    use HasFactory;
+    use HasFactory, ManagesReservationLifecycle;
 
     /**
      * Get the attributes that should be cast.
@@ -59,6 +63,7 @@ class RoomBooking extends Model
             'total' => 'integer',
             'amount_paid' => 'integer',
             'balance' => 'integer',
+            'balance_settled_at' => 'datetime',
             'status' => BookingStatus::class,
         ];
     }
@@ -92,6 +97,15 @@ class RoomBooking extends Model
     protected function blocking(Builder $query): void
     {
         $query->whereIn('status', BookingStatus::blocking());
+    }
+
+    /**
+     * Rooms record what the guest paid as the amount paid, which is the whole total
+     * when they chose to pay in full.
+     */
+    public function amountPaidColumn(): string
+    {
+        return 'amount_paid';
     }
 
     /**
