@@ -296,3 +296,25 @@ test('a room without photos still renders its card', function () {
         ->assertOk()
         ->assertSee('Plain Room');
 });
+
+test('the room details panel is pinned', function () {
+    $html = $this->get(route('booking.rooms'))->getContent();
+    $panel = str($html)->afterLast('rounded-3xl border border-zinc-200 bg-white p-6')->toString();
+
+    expect($panel)->toContain('lg:sticky')
+        ->and($panel)->toContain('lg:overflow-y-auto')
+        ->and($html)->toContain('lg:items-start');
+});
+
+test('the room panel prompts, then names the selection and its rate card', function () {
+    $room = Room::factory()->withRates([6 => 1200, 24 => 2500])->create(['name' => 'Family Room 201']);
+
+    Livewire::test('pages::booking.rooms')
+        ->assertSee('Pick a room from the list to get started')
+        ->call('selectRoom', $room->id)
+        ->assertSee('Selected')
+        ->assertSee('Family Room 201')
+        ->assertSee('6 h · ₱1,200')
+        ->assertSee('24 h · ₱2,500')
+        ->assertDontSee('Pick a room from the list');
+});

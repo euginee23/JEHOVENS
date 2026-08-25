@@ -242,3 +242,24 @@ test('a package without photos still renders its card', function () {
 
     $this->get(route('booking.catering'))->assertOk()->assertSee('Plain Package');
 });
+
+test('the catering details panel is pinned', function () {
+    $html = $this->get(route('booking.catering'))->getContent();
+    $panel = str($html)->afterLast('rounded-3xl border border-zinc-200 bg-white p-6')->toString();
+
+    expect($panel)->toContain('lg:sticky')
+        ->and($panel)->toContain('lg:overflow-y-auto')
+        ->and($html)->toContain('lg:items-start');
+});
+
+test('the catering panel prompts, then names the selection and its figures', function () {
+    Livewire::test('pages::booking.catering')
+        ->assertSee('Pick a package from the list to get started')
+        ->call('selectPackage', $this->package->id)
+        ->assertSee('Selected')
+        ->assertSee('Mediterranean Mezze')
+        ->assertSee('₱450 per head')
+        ->assertSee('Skirting ₱5,000')
+        ->assertSee('min. 20 guests')
+        ->assertDontSee('Pick a package from the list');
+});

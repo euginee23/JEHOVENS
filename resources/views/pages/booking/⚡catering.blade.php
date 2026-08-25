@@ -384,9 +384,19 @@ class extends Component {
                 </div>
 
                 {{-- Order details --}}
-                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
+                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8 lg:sticky lg:top-24 lg:max-h-[calc(100dvh-7.5rem)] lg:overflow-y-auto">
                     <h2 class="text-lg font-semibold text-zinc-900">{{ __('Order details') }}</h2>
 
+                    <x-booking.selection
+                        class="mt-5"
+                        :name="$this->package?->name"
+                        :prompt="__('Pick a package from the list to get started.')"
+                        :facts="$this->package ? [
+                            __('₱:price per head', ['price' => number_format($this->package->price_per_head)]),
+                            __('Skirting ₱:price', ['price' => number_format($this->package->skirting_price)]),
+                            __('min. :count guests', ['count' => number_format($this->package->minimum_guests)]),
+                        ] : []"
+                    />
                     <form wire:submit="proceedToPayment" class="mt-6 space-y-6">
                         <flux:input
                             wire:model.live="event_date"

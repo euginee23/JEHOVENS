@@ -484,9 +484,17 @@ class extends Component {
                 </div>
 
                 {{-- Booking details --}}
-                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
+                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8 lg:sticky lg:top-24 lg:max-h-[calc(100dvh-7.5rem)] lg:overflow-y-auto">
                     <h2 class="text-lg font-semibold text-zinc-900">{{ __('Booking details') }}</h2>
 
+                    <x-booking.selection
+                        class="mt-5"
+                        :name="$this->room?->name"
+                        :prompt="__('Pick a room from the list to get started.')"
+                        :facts="$this->room
+                            ? $this->room->rates->map(fn ($rate) => __(':hours h · ₱:price', ['hours' => $rate->hours, 'price' => number_format($rate->price)]))->all()
+                            : []"
+                    />
                     <form wire:submit="proceedToPayment" class="mt-6 space-y-6">
                         <flux:input
                             wire:model.live="checkin_date"

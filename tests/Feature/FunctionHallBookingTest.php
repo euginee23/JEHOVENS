@@ -225,3 +225,56 @@ test('changing the start time clears an end time that no longer fits', function 
         ->set('start_hour', 9)
         ->assertSet('end_hour', null);
 });
+
+test('the details panel is pinned so it stays visible while the list scrolls', function () {
+    $html = $this->get(route('booking.function-hall'))->getContent();
+
+    // The picker comes first; the details panel is the second card.
+    $panel = str($html)->afterLast('rounded-3xl border border-zinc-200 bg-white p-6')->toString();
+
+    expect($panel)->toContain('lg:sticky')
+        ->and($panel)->toContain('lg:top-24')
+        // Without a height cap the Proceed button is unreachable on a short screen.
+        ->and($panel)->toContain('lg:overflow-y-auto');
+
+    // sticky only works while the grid does not stretch its children.
+    expect($html)->toContain('lg:items-start');
+});
+
+test('the panel prompts for a selection before one is made', function () {
+    Hall::factory()->create();
+
+    Livewire::test('pages::booking.function-hall')
+        ->assertSee('Pick a hall from the list to get started')
+        ->assertDontSee('Selected');
+});
+
+test('the panel names the selected hall and its figures', function () {
+    $hall = Hall::factory()->create([
+        'name' => 'Grand Ballroom',
+        'rent_price' => 8000,
+        'skirting_price' => 5000,
+        'capacity' => 500,
+    ]);
+
+    Livewire::test('pages::booking.function-hall')
+        ->call('selectHall', $hall->id)
+        ->assertSee('Selected')
+        ->assertSee('Grand Ballroom')
+        ->assertSee('₱8,000 / 4 hrs')
+        ->assertSee('Skirting ₱5,000')
+        ->assertSee('up to 500 guests')
+        ->assertDontSee('Pick a hall from the list');
+});
+
+test('switching hall replaces the figures shown', function () {
+    $ballroom = Hall::factory()->create(['name' => 'Grand Ballroom', 'rent_price' => 8000]);
+    $pavilion = Hall::factory()->create(['name' => 'Garden Pavilion', 'rent_price' => 5000]);
+
+    Livewire::test('pages::booking.function-hall')
+        ->call('selectHall', $ballroom->id)
+        ->assertSee('₱8,000 / 4 hrs')
+        ->call('selectHall', $pavilion->id)
+        ->assertSee('₱5,000 / 4 hrs')
+        ->assertDontSee('₱8,000 / 4 hrs');
+});
