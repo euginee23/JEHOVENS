@@ -11,7 +11,7 @@ Built on Laravel 13 with Livewire 4, Flux UI, and Tailwind CSS v4.
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| PHP | 8.3 or newer | With the `pdo_sqlite` and `sqlite3` extensions enabled |
+| PHP | 8.4.1 or newer | With the `pdo_sqlite` and `sqlite3` extensions enabled |
 | Composer | 2.x | |
 | Node.js | 22.12+ (or 20.19+) | Required by Vite 8 |
 | npm | 10+ | Ships with Node |
@@ -206,18 +206,7 @@ Run `php artisan key:generate`.
 Run `php artisan config:clear`. Editing `.env` requires this whenever config has been
 cached.
 
----
-
-## Known issues
-
-`composer test` and `composer ci:check` currently fail at the PHPStan step on a stub method
-left over from the Laravel starter kit:
-
-```
-database/factories/UserFactory.php:49
-Method Database\Factories\UserFactory::withTwoFactor() should return
-static(Database\Factories\UserFactory) but return statement is missing.
-```
-
-This is unrelated to the site itself and does not affect the app at runtime. Use
-`php artisan test --compact` to run the test suite until the factory method is implemented.
+**`Your lock file does not contain a compatible set of packages`**
+Your PHP is older than the dependencies require. The locked Symfony packages need PHP
+8.4.1+; check with `php -v` and upgrade. Do **not** run `composer update` to work around
+this — it would silently downgrade packages across the whole project.
