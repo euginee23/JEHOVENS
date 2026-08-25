@@ -36,7 +36,7 @@ test('the settings index redirects to profile without doubling the admin prefix'
 });
 
 test('settings pages live under the admin prefix and require signing in', function () {
-    foreach (['profile.edit', 'security.edit', 'appearance.edit'] as $name) {
+    foreach (['profile.edit', 'security.edit'] as $name) {
         expect(route($name, absolute: false))->toStartWith('/admin/settings/');
 
         $this->get(route($name))->assertRedirect(route('login'));

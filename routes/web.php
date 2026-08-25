@@ -26,7 +26,7 @@ Route::livewire('book/catering', 'pages::booking.catering')->name('booking.cater
 */
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::view('admin', 'dashboard')->name('admin.dashboard');
+    Route::livewire('admin', 'pages::admin.dashboard')->name('admin.dashboard');
 });
 
 /*

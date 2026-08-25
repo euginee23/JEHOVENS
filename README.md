@@ -155,9 +155,13 @@ resources/
 ├── css/app.css                       Tailwind theme — brand colours live here
 └── views/
     ├── layouts/marketing.blade.php   Public site shell (nav + footer)
+    ├── layouts/admin.blade.php       Staff shell (in-page topbar)
+    ├── layouts/auth.blade.php        Sign-in shell
     ├── pages/marketing/home.blade.php  The landing page
-    ├── pages/auth/                   Login, register, password reset
-    ├── pages/settings/               Profile, security, appearance
+    ├── pages/booking/                Function hall, rooms, catering
+    ├── pages/admin/                  Dashboard
+    ├── pages/auth/                   Login, password reset
+    ├── pages/settings/               Profile, security
     ├── components/marketing/         nav, footer, cards, section headings
     └── partials/marketing-head.blade.php  <head> tags for public pages
 
@@ -244,14 +248,18 @@ verification link.
 
 | URL | What it is |
 | --- | --- |
-| `/admin` | Dashboard (redirects to the login when signed out) |
+| `/admin` | Dashboard — live reservation figures (redirects to the login when signed out) |
 | `/admin/login` | Staff sign-in |
 | `/admin/forgot-password` | Password reset request |
 | `/admin/settings/profile` | Name and email |
 | `/admin/settings/security` | Password |
-| `/admin/settings/appearance` | Light/dark preference |
 
 `/dashboard` and `/settings` redirect into `/admin` for anyone with an old bookmark.
+
+The dashboard is read-only: it shows counts of reservations awaiting payment, bookings made
+this week, confirmed revenue for the month, and what is coming up in the next seven days,
+plus the newest reservations across all three types. Confirming a downpayment still means
+updating the row's `status` in the database.
 
 ---
 
