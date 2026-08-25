@@ -44,7 +44,7 @@
 
                 <div class="mt-9 flex flex-wrap items-center gap-3">
                     <a
-                        href="{{ auth()->check() ? route('dashboard') : route('register') }}"
+                        href="{{ route('booking.function-hall') }}"
                         class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700"
                     >
                         {{ __('Book your stay') }}
@@ -295,7 +295,7 @@
                     </ul>
 
                     <a
-                        href="{{ auth()->check() ? route('dashboard') : route('register') }}"
+                        href="{{ route('booking.function-hall') }}"
                         class="mt-10 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700"
                     >
                         {{ __('Book now') }}
@@ -321,21 +321,19 @@
 
             <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
                 <a
-                    href="{{ auth()->check() ? route('dashboard') : route('register') }}"
+                    href="{{ route('booking.function-hall') }}"
                     class="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-brand-800 shadow-sm transition hover:bg-brand-50"
                 >
                     {{ __('Book now') }}
                     <span aria-hidden="true">&rarr;</span>
                 </a>
 
-                @guest
-                    <a
-                        href="{{ route('login') }}"
-                        class="inline-flex items-center gap-2 rounded-xl border border-white/30 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-white/10"
-                    >
-                        {{ __('I already have an account') }}
-                    </a>
-                @endguest
+                <a
+                    href="{{ route('booking.rooms') }}"
+                    class="inline-flex items-center gap-2 rounded-xl border border-white/30 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-white/10"
+                >
+                    {{ __('Book a room') }}
+                </a>
             </div>
         </div>
     </section>

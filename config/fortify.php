@@ -73,7 +73,7 @@ return [
     |
     */
 
-    'home' => '/dashboard',
+    'home' => '/admin',
 
     /*
     |--------------------------------------------------------------------------
@@ -86,7 +86,7 @@ return [
     |
     */
 
-    'prefix' => '',
+    'prefix' => 'admin',
 
     'domain' => null,
 
@@ -143,7 +143,8 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // Registration is deliberately absent: the public site is guests-only and admin
+        // accounts are created with `php artisan resort:make-admin`.
         Features::resetPasswords(),
         Features::emailVerification(),
     ],

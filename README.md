@@ -199,6 +199,62 @@ only for the migration step, and runs the suite on SQLite.
 
 ---
 
+## Admin area
+
+The public site needs no accounts — guests book halls, rooms, and catering without signing
+in. The only part of the site behind a login is the admin area at **`/admin`**, which
+redirects to `/admin/login` until you sign in.
+
+**There is no public sign-up.** Fortify's registration feature is switched off and
+`/register` returns 404. There are two ways to create an administrator.
+
+**Seeder** — creates the default account, and runs as part of `php artisan db:seed`:
+
+```bash
+php artisan db:seed --class=AdminSeeder
+```
+
+| | |
+| --- | --- |
+| Email | `admin@admin.com` |
+| Password | `password` |
+
+Override these with `ADMIN_NAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` in `.env` before
+seeding anywhere public. The seeder is idempotent — re-running it updates the same account
+rather than creating a second one.
+
+> **Change the default password before the site is reachable from the internet.**
+> `admin@admin.com` / `password` is a guess away from full access to the admin area.
+
+**Console** — for any account after the first, or to avoid the default credentials
+entirely:
+
+```bash
+php artisan resort:make-admin
+```
+
+It prompts for name, email, and password, or takes them as options:
+
+```bash
+php artisan resort:make-admin --name="Jane" --email="jane@example.com" --password="..."
+```
+
+Accounts created this way are marked as verified, since nobody is there to click a
+verification link.
+
+| URL | What it is |
+| --- | --- |
+| `/admin` | Dashboard (redirects to the login when signed out) |
+| `/admin/login` | Staff sign-in |
+| `/admin/forgot-password` | Password reset request |
+| `/admin/settings/profile` | Name and email |
+| `/admin/settings/security` | Password |
+| `/admin/settings/appearance` | Light/dark preference |
+
+`/dashboard` and `/settings` redirect into `/admin` for anyone with an old bookmark.
+
+---
+
 ## Troubleshooting
 
 **`Unable to locate file in Vite manifest`**

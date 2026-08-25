@@ -37,26 +37,23 @@
             </div>
 
             <div>
-                <h2 class="text-sm font-semibold text-zinc-900">{{ __('Reservations') }}</h2>
+                <h2 class="text-sm font-semibold text-zinc-900">{{ __('Book with us') }}</h2>
                 <ul class="mt-4 space-y-3">
-                    @auth
-                        <li>
-                            <a href="{{ route('dashboard') }}" class="text-sm text-zinc-600 transition-colors hover:text-brand-700">
-                                {{ __('Go to dashboard') }}
-                            </a>
-                        </li>
-                    @else
-                        <li>
-                            <a href="{{ route('register') }}" class="text-sm text-zinc-600 transition-colors hover:text-brand-700">
-                                {{ __('Create an account') }}
-                            </a>
-                        </li>
-                        <li>
-                            <a href="{{ route('login') }}" class="text-sm text-zinc-600 transition-colors hover:text-brand-700">
-                                {{ __('Log in') }}
-                            </a>
-                        </li>
-                    @endauth
+                    <li>
+                        <a href="{{ route('booking.function-hall') }}" class="text-sm text-zinc-600 transition-colors hover:text-brand-700">
+                            {{ __('Reserve a function hall') }}
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ route('booking.rooms') }}" class="text-sm text-zinc-600 transition-colors hover:text-brand-700">
+                            {{ __('Reserve a room') }}
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ route('booking.catering') }}" class="text-sm text-zinc-600 transition-colors hover:text-brand-700">
+                            {{ __('Order catering') }}
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>

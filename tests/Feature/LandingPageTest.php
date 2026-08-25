@@ -26,19 +26,23 @@ test('the landing page renders every hero photo', function () {
     }
 });
 
-test('guests are pointed at login and registration', function () {
+test('the public site points guests at the booking pages, not at an account', function () {
     $response = $this->get(route('home'));
 
-    $response->assertSee(route('login'), escape: false);
-    $response->assertSee(route('register'), escape: false);
+    $response->assertSee(route('booking.function-hall'), escape: false);
+    $response->assertSee(route('booking.rooms'), escape: false);
+    $response->assertSee(route('booking.catering'), escape: false);
+
+    $response->assertDontSee(route('login'), escape: false);
+    $response->assertDontSee(route('admin.dashboard'), escape: false);
 });
 
-test('authenticated users are pointed at the dashboard instead', function () {
+test('the public site never links to the admin area, even for a signed-in admin', function () {
     $this->actingAs(User::factory()->create());
 
     $response = $this->get(route('home'));
 
     $response->assertOk();
-    $response->assertSee(route('dashboard'), escape: false);
-    $response->assertDontSee(route('register'), escape: false);
+    $response->assertDontSee(route('login'), escape: false);
+    $response->assertDontSee(route('admin.dashboard'), escape: false);
 });

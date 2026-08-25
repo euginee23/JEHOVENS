@@ -34,30 +34,15 @@
             @endforeach
         </div>
 
-        {{-- Below `sm` the brand name and the burger take the whole bar, so the CTAs
-             move into the disclosure panel rather than truncating the resort's name. --}}
+        {{-- Below `sm` the brand name and the burger take the whole bar, so the CTA
+             moves into the disclosure panel rather than truncating the resort's name. --}}
         <div class="ms-auto flex shrink-0 items-center gap-2">
-            @auth
-                <a
-                    href="{{ route('dashboard') }}"
-                    class="hidden whitespace-nowrap rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700 sm:block"
-                >
-                    {{ __('Dashboard') }}
-                </a>
-            @else
-                <a
-                    href="{{ route('login') }}"
-                    class="hidden rounded-lg px-3 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 sm:block"
-                >
-                    {{ __('Log in') }}
-                </a>
-                <a
-                    href="{{ route('register') }}"
-                    class="hidden whitespace-nowrap rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700 sm:block"
-                >
-                    {{ __('Book now') }}
-                </a>
-            @endauth
+            <a
+                href="{{ route('booking.function-hall') }}"
+                class="hidden whitespace-nowrap rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700 sm:block"
+            >
+                {{ __('Book now') }}
+            </a>
 
             <button
                 type="button"
@@ -94,18 +79,9 @@
                 </a>
             @endforeach
 
-            @auth
-                <a href="{{ route('dashboard') }}" class="mt-3 block rounded-lg bg-brand-600 px-4 py-3 text-center text-base font-semibold text-white sm:hidden">
-                    {{ __('Dashboard') }}
-                </a>
-            @else
-                <a href="{{ route('login') }}" class="block rounded-lg px-3 py-2.5 text-base font-medium text-zinc-700 hover:bg-zinc-100 sm:hidden">
-                    {{ __('Log in') }}
-                </a>
-                <a href="{{ route('register') }}" class="mt-3 block rounded-lg bg-brand-600 px-4 py-3 text-center text-base font-semibold text-white sm:hidden">
-                    {{ __('Book now') }}
-                </a>
-            @endauth
+            <a href="{{ route('booking.function-hall') }}" class="mt-3 block rounded-lg bg-brand-600 px-4 py-3 text-center text-base font-semibold text-white sm:hidden">
+                {{ __('Book now') }}
+            </a>
         </div>
     </div>
 </header>
