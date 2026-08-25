@@ -1,6 +1,6 @@
 @props([
     'title',
-    'image',
+    'photos',
     'eyebrow' => null,
     'items' => [],
     'cta' => null,
@@ -8,13 +8,13 @@
 ])
 
 <article {{ $attributes->class(['group flex scroll-mt-24 flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-xl hover:shadow-brand-900/10']) }}>
-    <div class="relative aspect-4/3 overflow-hidden bg-zinc-100">
-        <img
-            src="{{ $image }}"
-            alt=""
-            loading="lazy"
-            decoding="async"
-            class="size-full object-cover transition duration-500 group-hover:scale-105 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+    <div class="relative aspect-4/3">
+        <x-marketing.photo-slideshow
+            :photos="$photos"
+            dots
+            dots-align="end"
+            img-class="transition-transform duration-500 group-hover:scale-105 motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+            class="size-full"
         />
 
         @if ($eyebrow)

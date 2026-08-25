@@ -1,10 +1,25 @@
 @php
     $heroSlides = [
-        ['file' => 'hero-slider-1.jpg', 'width' => 720, 'height' => 1200, 'alt' => __('The main pool and cottages at Jehoven\'s Garden Resort')],
-        ['file' => 'hero-slider-2.jpg', 'width' => 995, 'height' => 1666, 'alt' => __('The swimming pool seen from the poolside')],
-        ['file' => 'hero-slider-3.jpg', 'width' => 720, 'height' => 1201, 'alt' => __('The pool area dressed up for a celebration')],
-        ['file' => 'hero-slider-4.jpg', 'width' => 720, 'height' => 1201, 'alt' => __('An event set up under the trees with buntings and tents')],
-        ['file' => 'hero-slider-5.jpg', 'width' => 480, 'height' => 804, 'alt' => __('Garden greenery around the pool')],
+        ['file' => 'resort/hero-slider-1.jpg', 'width' => 720, 'height' => 1200, 'alt' => __('The main pool and cottages at Jehoven\'s Garden Resort')],
+        ['file' => 'resort/hero-slider-2.jpg', 'width' => 995, 'height' => 1666, 'alt' => __('The swimming pool seen from the poolside')],
+        ['file' => 'resort/hero-slider-3.jpg', 'width' => 720, 'height' => 1201, 'alt' => __('The pool area dressed up for a celebration')],
+        ['file' => 'resort/hero-slider-4.jpg', 'width' => 720, 'height' => 1201, 'alt' => __('An event set up under the trees with buntings and tents')],
+        ['file' => 'resort/hero-slider-5.jpg', 'width' => 480, 'height' => 804, 'alt' => __('Garden greenery around the pool')],
+    ];
+
+    $hallPhotos = [
+        ['file' => 'function-hall/function-hall-1.jpg', 'width' => 1600, 'height' => 1200, 'alt' => __('The function hall with draped ceiling, stage backdrop, and stacked chairs')],
+        ['file' => 'resort/hero-slider-4.jpg', 'width' => 720, 'height' => 1201, 'alt' => __('An event set up under the trees with buntings and tents')],
+    ];
+
+    $roomPhotos = [
+        ['file' => 'rooms/room-1.jpg', 'width' => 1856, 'height' => 1870, 'alt' => __('Air-conditioned room with a double bed and wicker frame')],
+        ['file' => 'rooms/room-2.jpg', 'width' => 1536, 'height' => 2048, 'alt' => __('Room with a double bed, air-conditioning, and shelving')],
+        ['file' => 'rooms/room-3.jpg', 'width' => 1536, 'height' => 2048, 'alt' => __('Room with a wicker sofa, side table, and a double bed')],
+    ];
+
+    $cateringPhotos = [
+        ['file' => 'catering/catering-1.jpg', 'width' => 1536, 'height' => 2048, 'alt' => __('Buffet spread laid out for an event at the resort')],
     ];
 
     $amenities = [
@@ -64,45 +79,14 @@
                 </p>
             </div>
 
-            {{-- Crossfading photo panel. Frame 1 renders visible so it is up before Alpine boots. --}}
-            <div
-                x-data="{ current: 0, total: {{ count($heroSlides) }} }"
-                x-init="setInterval(() => current = (current + 1) % total, 5000)"
-                class="relative mt-14 lg:mt-0"
-            >
-                <div class="relative aspect-4/5 overflow-hidden rounded-3xl bg-zinc-100 shadow-2xl shadow-brand-900/20 ring-1 ring-black/5 sm:aspect-3/4 lg:aspect-4/5">
-                    @foreach ($heroSlides as $index => $slide)
-                        <img
-                            src="{{ asset('images/resort/'.$slide['file']) }}"
-                            alt="{{ $slide['alt'] }}"
-                            width="{{ $slide['width'] }}"
-                            height="{{ $slide['height'] }}"
-                            @if ($loop->first) fetchpriority="high" @else loading="lazy" @endif
-                            decoding="async"
-                            x-bind:class="current === {{ $index }} ? 'opacity-100' : 'opacity-0'"
-                            @class([
-                                'absolute inset-0 size-full object-cover transition-opacity duration-1000 motion-reduce:transition-none',
-                                'opacity-100' => $loop->first,
-                                'opacity-0' => ! $loop->first,
-                            ])
-                        />
-                    @endforeach
-
-                    <div aria-hidden="true" class="absolute inset-x-0 bottom-0 h-32 bg-linear-to-t from-black/40 to-transparent"></div>
-
-                    <div class="absolute bottom-5 left-1/2 flex -translate-x-1/2 gap-2">
-                        @foreach ($heroSlides as $index => $slide)
-                            <button
-                                type="button"
-                                x-on:click="current = {{ $index }}"
-                                x-bind:class="current === {{ $index }} ? 'w-6 bg-white' : 'w-1.5 bg-white/50 hover:bg-white/80'"
-                                class="h-1.5 rounded-full transition-all duration-300"
-                            >
-                                <span class="sr-only">{{ __('Show photo :number', ['number' => $index + 1]) }}</span>
-                            </button>
-                        @endforeach
-                    </div>
-                </div>
+            <div class="relative mt-14 lg:mt-0">
+                <x-marketing.photo-slideshow
+                    :photos="$heroSlides"
+                    dots
+                    scrim
+                    eager
+                    class="aspect-4/5 rounded-3xl shadow-2xl shadow-brand-900/20 ring-1 ring-black/5 sm:aspect-3/4 lg:aspect-4/5"
+                />
 
                 <div aria-hidden="true" class="absolute -bottom-6 -left-6 -z-10 size-40 rounded-3xl bg-coral-400/20 blur-2xl"></div>
             </div>
@@ -207,7 +191,7 @@
                     id="function-hall"
                     :title="__('Function Hall')"
                     :eyebrow="__('Events')"
-                    :image="asset('images/resort/hero-slider-4.jpg')"
+                    :photos="$hallPhotos"
                     :items="[
                         __('Aircon and non-aircon halls'),
                         __('Seating for gatherings and meetings'),
@@ -223,7 +207,7 @@
                     id="rooms"
                     :title="__('Rooms')"
                     :eyebrow="__('Stay')"
-                    :image="asset('images/resort/hero-slider-5.jpg')"
+                    :photos="$roomPhotos"
                     :items="[
                         __('Short-hour or overnight stays'),
                         __('Affordable, flexible rates'),
@@ -239,7 +223,7 @@
                     id="catering"
                     :title="__('Catering')"
                     :eyebrow="__('Food')"
-                    :image="asset('images/resort/hero-slider-3.jpg')"
+                    :photos="$cateringPhotos"
                     :items="[
                         __('Packages for birthdays and events'),
                         __('Menus built around your guest count'),
