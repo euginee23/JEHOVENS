@@ -38,7 +38,7 @@
              moves into the disclosure panel rather than truncating the resort's name. --}}
         <div class="ms-auto flex shrink-0 items-center gap-2">
             <a
-                href="{{ route('booking.function-hall') }}"
+                href="{{ route('home') }}#book"
                 class="hidden whitespace-nowrap rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700 sm:block"
             >
                 {{ __('Book now') }}
@@ -66,7 +66,9 @@
         x-cloak
         x-transition.origin.top
         x-on:click.outside="open = false"
-        class="border-t border-zinc-200 bg-white lg:hidden"
+        {{-- Overlays the page instead of sitting in the flow: an in-flow panel shifts the
+             document up as it collapses, landing anchor links short of their target. --}}
+        class="absolute inset-x-0 top-full border-t border-zinc-200 bg-white shadow-lg shadow-zinc-900/5 lg:hidden"
     >
         <div class="space-y-1 px-4 py-4 sm:px-6">
             @foreach ($links as $link)
@@ -79,7 +81,7 @@
                 </a>
             @endforeach
 
-            <a href="{{ route('booking.function-hall') }}" class="mt-3 block rounded-lg bg-brand-600 px-4 py-3 text-center text-base font-semibold text-white sm:hidden">
+            <a href="{{ route('home') }}#book" x-on:click="open = false" class="mt-3 block rounded-lg bg-brand-600 px-4 py-3 text-center text-base font-semibold text-white sm:hidden">
                 {{ __('Book now') }}
             </a>
         </div>

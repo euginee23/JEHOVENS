@@ -44,7 +44,7 @@
 
                 <div class="mt-9 flex flex-wrap items-center gap-3">
                     <a
-                        href="{{ route('booking.function-hall') }}"
+                        href="#book"
                         class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700"
                     >
                         {{ __('Book your stay') }}
@@ -120,13 +120,15 @@
     </section>
 
     {{-- Our services --}}
-    <section id="services" class="scroll-mt-20 bg-white py-20 lg:py-28">
+    <section class="bg-white py-20 lg:py-28">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <x-marketing.section-heading
-                :eyebrow="__('Our services')"
-                :title="__('Everything you need in one place')"
-                :description="__('Jehoven\'s Garden Resort is built for both quiet weekends and big celebrations — and every booking starts the same simple way.')"
-            />
+            <div id="services" class="scroll-mt-24">
+                <x-marketing.section-heading
+                    :eyebrow="__('Our services')"
+                    :title="__('Everything you need in one place')"
+                    :description="__('Jehoven\'s Garden Resort is built for both quiet weekends and big celebrations — and every booking starts the same simple way.')"
+                />
+            </div>
 
             <div class="mt-14 grid gap-6 lg:grid-cols-3">
                 {{-- `lg:aspect-auto` + an absolutely-filled image lets the two card rows
@@ -192,11 +194,13 @@
     {{-- What you can book --}}
     <section class="border-t border-zinc-200 bg-zinc-50 py-20 lg:py-28">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <x-marketing.section-heading
-                :eyebrow="__('What you can book')"
-                :title="__('Pick the space, we\'ll handle the rest')"
-                :description="__('Reserve a hall, a room, or a full catering package. Every booking is confirmed with a 50% down payment.')"
-            />
+            <div id="book" class="scroll-mt-24">
+                <x-marketing.section-heading
+                    :eyebrow="__('What you can book')"
+                    :title="__('Pick the space, we\'ll handle the rest')"
+                    :description="__('Reserve a hall, a room, or a full catering package. Every booking is confirmed with a 50% down payment.')"
+                />
+            </div>
 
             <div class="mt-14 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 <x-marketing.offer-card
@@ -253,9 +257,9 @@
     {{-- Discover --}}
     {{-- `overflow-hidden` clips the decorative blur behind the photo, which otherwise
          pushes the page wider than the viewport on small screens. --}}
-    <section id="about" class="scroll-mt-20 overflow-hidden bg-white py-20 lg:py-28">
+    <section class="overflow-hidden bg-white py-20 lg:py-28">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
+            <div id="about" class="grid scroll-mt-24 items-center gap-12 lg:grid-cols-2 lg:gap-20">
                 <div class="relative">
                     <div class="overflow-hidden rounded-3xl bg-zinc-100 shadow-xl shadow-brand-900/10 ring-1 ring-black/5">
                         <img
@@ -321,7 +325,7 @@
 
             <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
                 <a
-                    href="{{ route('booking.function-hall') }}"
+                    href="#book"
                     class="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-brand-800 shadow-sm transition hover:bg-brand-50"
                 >
                     {{ __('Book now') }}
