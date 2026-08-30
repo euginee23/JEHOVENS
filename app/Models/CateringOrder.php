@@ -16,6 +16,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
+ * An order runs from `start_date` to `end_date` inclusive, and `days` counts those days.
+ * The same package is served to the same head count on each one, so `guests` describes a
+ * single day: a three-day order for 100 guests is `guests = 100` and `days = 3`, and its
+ * `catering_total` already covers all three days.
+ *
  * @property int $id
  * @property string $reference
  * @property int $catering_package_id
@@ -23,7 +28,9 @@ use Illuminate\Support\Str;
  * @property string $guest_name
  * @property string $guest_phone
  * @property string $guest_email
- * @property Carbon $event_date
+ * @property Carbon $start_date
+ * @property Carbon $end_date
+ * @property int $days
  * @property int $guests
  * @property bool $include_skirting
  * @property int $price_per_head
@@ -42,7 +49,7 @@ use Illuminate\Support\Str;
  */
 #[Fillable([
     'reference', 'catering_package_id', 'user_id', 'guest_name', 'guest_phone', 'guest_email',
-    'event_date', 'guests', 'include_skirting', 'price_per_head', 'catering_total',
+    'start_date', 'end_date', 'days', 'guests', 'include_skirting', 'price_per_head', 'catering_total',
     'skirting_total', 'total', 'downpayment', 'balance', 'status',
     'balance_settled_at', 'admin_note',
 ])]
@@ -59,7 +66,9 @@ class CateringOrder extends Model
     protected function casts(): array
     {
         return [
-            'event_date' => 'date',
+            'start_date' => 'date',
+            'end_date' => 'date',
+            'days' => 'integer',
             'guests' => 'integer',
             'include_skirting' => 'boolean',
             'price_per_head' => 'integer',

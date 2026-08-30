@@ -103,18 +103,22 @@ class Hall extends Model implements Photographable
     }
 
     /**
-     * Price a stay of the given length, in whole pesos.
+     * Price a booking of the given length, in whole pesos.
+     *
+     * `$hours` is the slot held on each day and `$days` is how many days the booking runs
+     * for, so the hall is re-rented — and re-skirted — for every day of a multi-day event.
      *
      * The downpayment is rounded up so the resort is never short a peso on an odd total.
      *
      * @return array{blocks: int, rent_total: int, skirting_total: int, total: int, downpayment: int, balance: int}
      */
-    public function quote(int $hours, bool $includeSkirting): array
+    public function quote(int $hours, bool $includeSkirting, int $days = 1): array
     {
         $blocks = intdiv($hours, self::HOURS_PER_BLOCK);
+        $days = max($days, 1);
 
-        $rentTotal = $this->rent_price * $blocks;
-        $skirtingTotal = $includeSkirting ? $this->skirting_price : 0;
+        $rentTotal = $this->rent_price * $blocks * $days;
+        $skirtingTotal = $includeSkirting ? $this->skirting_price * $days : 0;
         $total = $rentTotal + $skirtingTotal;
         $downpayment = (int) ceil($total * self::DOWNPAYMENT_RATE);
 

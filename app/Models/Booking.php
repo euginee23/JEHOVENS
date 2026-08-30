@@ -16,6 +16,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
+ * A booking runs from `start_date` to `end_date` inclusive, and `days` counts those days.
+ * The same time window is held on every one of them, so `start_hour`, `end_hour` and
+ * `hours` all describe a single day: a three-day booking of an 8-hour slot is `hours = 8`
+ * and `days = 3`, and its `rent_total` already covers all three days.
+ *
  * @property int $id
  * @property string $reference
  * @property int $hall_id
@@ -23,7 +28,9 @@ use Illuminate\Support\Str;
  * @property string $guest_name
  * @property string $guest_phone
  * @property string $guest_email
- * @property Carbon $booking_date
+ * @property Carbon $start_date
+ * @property Carbon $end_date
+ * @property int $days
  * @property int $start_hour
  * @property int $end_hour
  * @property int $hours
@@ -43,7 +50,7 @@ use Illuminate\Support\Str;
  */
 #[Fillable([
     'reference', 'hall_id', 'user_id', 'guest_name', 'guest_phone', 'guest_email',
-    'booking_date', 'start_hour', 'end_hour', 'hours', 'include_skirting',
+    'start_date', 'end_date', 'days', 'start_hour', 'end_hour', 'hours', 'include_skirting',
     'rent_total', 'skirting_total', 'total', 'downpayment', 'balance', 'status',
     'balance_settled_at', 'admin_note',
 ])]
@@ -60,7 +67,9 @@ class Booking extends Model
     protected function casts(): array
     {
         return [
-            'booking_date' => 'date',
+            'start_date' => 'date',
+            'end_date' => 'date',
+            'days' => 'integer',
             'start_hour' => 'integer',
             'end_hour' => 'integer',
             'hours' => 'integer',

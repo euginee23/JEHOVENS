@@ -26,7 +26,12 @@ class CateringOrderFactory extends Factory
             'guest_name' => fake()->name(),
             'guest_phone' => '09'.fake()->numerify('#########'),
             'guest_email' => fake()->unique()->safeEmail(),
-            'event_date' => fake()->dateTimeBetween('+1 day', '+3 months')->format('Y-m-d'),
+            'start_date' => fake()->dateTimeBetween('+1 day', '+3 months')->format('Y-m-d'),
+
+            // Left for configure() to work out from `days`, so a test overriding only
+            // `start_date` still gets a coherent range.
+            'end_date' => null,
+            'days' => 1,
             'guests' => fake()->numberBetween(20, 200),
             'include_skirting' => fake()->boolean(),
             'status' => BookingStatus::Pending,
@@ -34,18 +39,34 @@ class CateringOrderFactory extends Factory
     }
 
     /**
-     * Fill the money columns from the package's own pricing once it is resolved.
+     * Settle the date range, then fill the money columns from the package's own pricing.
      */
     public function configure(): static
     {
         return $this->afterMaking(function (CateringOrder $order) {
-            $quote = $order->package->quote($order->guests, $order->include_skirting);
+            // Both ends are settled here rather than in a state, so an explicit
+            // `start_date` passed to create() is the one the range is measured from.
+            $order->end_date ??= $order->start_date->copy()->addDays(max($order->days, 1) - 1);
+            $order->days = (int) $order->start_date->diffInDays($order->end_date) + 1;
+
+            $quote = $order->package->quote($order->guests, $order->include_skirting, $order->days);
 
             $order->forceFill([
                 'price_per_head' => $order->package->price_per_head,
                 ...$quote,
             ]);
         });
+    }
+
+    /**
+     * Indicate that the order covers several consecutive days.
+     */
+    public function spanningDays(int $days): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'days' => $days,
+            'end_date' => null,
+        ]);
     }
 
     /**

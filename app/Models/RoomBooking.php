@@ -16,6 +16,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
+ * A stay is either day use or an overnight run, and `nights` says which. Zero nights is a
+ * day-use booking sold as one of the room's 6/12/24-hour rate blocks; one or more nights
+ * is an overnight stay sold at the room's 24-hour rate for each night. Either way
+ * `starts_at` and `ends_at` bound the whole stay and `hours` is its full length.
+ *
  * @property int $id
  * @property string $reference
  * @property int $room_id
@@ -26,6 +31,7 @@ use Illuminate\Support\Str;
  * @property Carbon $starts_at
  * @property Carbon $ends_at
  * @property int $hours
+ * @property int $nights
  * @property bool $pay_in_full
  * @property int $total
  * @property int $amount_paid
@@ -40,7 +46,7 @@ use Illuminate\Support\Str;
  */
 #[Fillable([
     'reference', 'room_id', 'user_id', 'guest_name', 'guest_phone', 'guest_email',
-    'starts_at', 'ends_at', 'hours', 'pay_in_full', 'total', 'amount_paid', 'balance', 'status',
+    'starts_at', 'ends_at', 'hours', 'nights', 'pay_in_full', 'total', 'amount_paid', 'balance', 'status',
     'balance_settled_at', 'admin_note',
 ])]
 class RoomBooking extends Model
@@ -59,6 +65,7 @@ class RoomBooking extends Model
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
             'hours' => 'integer',
+            'nights' => 'integer',
             'pay_in_full' => 'boolean',
             'total' => 'integer',
             'amount_paid' => 'integer',
@@ -114,6 +121,24 @@ class RoomBooking extends Model
     public function arriveBy(): CarbonInterface
     {
         return $this->starts_at->copy()->subMinutes(Room::ARRIVE_EARLY_MINUTES);
+    }
+
+    /**
+     * Whether the guest is staying the night rather than booking the room for the day.
+     */
+    public function isOvernight(): bool
+    {
+        return $this->nights > 0;
+    }
+
+    /**
+     * How the stay was sold, for guests reading their confirmation.
+     */
+    public function stayLabel(): string
+    {
+        return $this->isOvernight()
+            ? trans_choice('{1} :count night|[2,*] :count nights', $this->nights, ['count' => $this->nights])
+            : __('Day use');
     }
 
     /**

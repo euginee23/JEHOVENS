@@ -17,7 +17,8 @@ function fillCateringOrder(CateringPackage $package, array $overrides = []): Tes
 
     $input = array_merge([
         'package_id' => $package->id,
-        'event_date' => now()->addMonth()->toDateString(),
+        'start_date' => now()->addMonth()->toDateString(),
+        'end_date' => now()->addMonth()->toDateString(),
         'guests' => 80,
         'include_skirting' => true,
         'guest_name' => 'Juan dela Cruz',
@@ -166,9 +167,55 @@ test('a package must be chosen', function () {
 });
 
 test('the event date cannot be in the past', function () {
-    fillCateringOrder($this->package, ['event_date' => now()->subDay()->toDateString()])
+    fillCateringOrder($this->package, [
+        'start_date' => now()->subDay()->toDateString(),
+        'end_date' => now()->subDay()->toDateString(),
+    ])
         ->call('proceedToPayment')
-        ->assertHasErrors(['event_date' => 'after_or_equal']);
+        ->assertHasErrors(['start_date' => 'after_or_equal']);
+});
+
+test('a multi-day quote charges the head count and skirting for every day', function () {
+    $quote = $this->package->quote(guests: 80, includeSkirting: true, days: 3);
+
+    expect($quote)->toMatchArray([
+        'catering_total' => 108_000,  // 450 × 80 guests × 3 days
+        'skirting_total' => 15_000,   // 5,000 × 3 days
+        'total' => 123_000,
+        'downpayment' => 61_500,
+    ]);
+});
+
+test('an order can run across several days', function () {
+    $start = now()->addMonth()->toDateString();
+    $end = now()->addMonth()->addDays(2)->toDateString();
+
+    fillCateringOrder($this->package, ['start_date' => $start, 'end_date' => $end])
+        ->call('confirmPayment')
+        ->assertHasNoErrors();
+
+    $order = CateringOrder::sole();
+
+    expect($order)
+        ->days->toBe(3)
+        ->guests->toBe(80)   // the head count is per day, not the total across the range
+        ->catering_total->toBe(108_000)
+        ->skirting_total->toBe(15_000)
+        ->total->toBe(123_000);
+
+    expect($order->start_date->toDateString())->toBe($start)
+        ->and($order->end_date->toDateString())->toBe($end);
+});
+
+test('the last day cannot come before the first', function () {
+    fillCateringOrder($this->package, [
+        'start_date' => now()->addMonth()->toDateString(),
+        'end_date' => now()->addDays(2)->toDateString(),
+    ])
+        ->call('proceedToPayment')
+        ->assertHasErrors(['end_date' => 'after_or_equal']);
+
+    expect(CateringOrder::count())->toBe(0);
 });
 
 test('a head count is required', function () {
@@ -208,9 +255,9 @@ test('the phone number must be an 11-digit mobile number', function () {
 test('two orders can share the same event date', function () {
     $date = now()->addMonth()->toDateString();
 
-    CateringOrder::factory()->for($this->package, 'package')->create(['event_date' => $date]);
+    CateringOrder::factory()->for($this->package, 'package')->create(['start_date' => $date]);
 
-    fillCateringOrder($this->package, ['event_date' => $date])
+    fillCateringOrder($this->package, ['start_date' => $date, 'end_date' => $date])
         ->call('confirmPayment')
         ->assertHasNoErrors();
 

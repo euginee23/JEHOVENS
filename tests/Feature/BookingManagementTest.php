@@ -8,6 +8,7 @@ use App\Models\Hall;
 use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -48,9 +49,9 @@ test('search matches reference, name, phone, and email', function () {
 test('bookings can be filtered by status, hall, and date range', function () {
     $other = Hall::factory()->create();
 
-    $pending = Booking::factory()->for($this->hall)->create(['booking_date' => '2027-03-10', 'status' => BookingStatus::Pending]);
-    Booking::factory()->for($this->hall)->confirmed()->create(['booking_date' => '2027-03-20']);
-    Booking::factory()->for($other)->create(['booking_date' => '2027-03-10']);
+    $pending = Booking::factory()->for($this->hall)->create(['start_date' => '2027-03-10', 'status' => BookingStatus::Pending]);
+    Booking::factory()->for($this->hall)->confirmed()->create(['start_date' => '2027-03-20']);
+    Booking::factory()->for($other)->create(['start_date' => '2027-03-10']);
 
     $page = Livewire::test('pages::admin.bookings');
 
@@ -64,6 +65,43 @@ test('bookings can be filtered by status, hall, and date range', function () {
 
     $page->set('from', '')->set('until', '2027-03-15');
     expect($page->get('bookings')->pluck('id')->all())->toContain($pending->id);
+});
+
+test('a booking running across the filter window still shows up in it', function () {
+    // Starts before the window and ends after it, so matching on the first day alone
+    // would lose it entirely.
+    $straddling = Booking::factory()->for($this->hall)->spanningDays(5)->create(['start_date' => '2027-03-08']);
+
+    Booking::factory()->for($this->hall)->create(['start_date' => '2027-04-01']);
+
+    $page = Livewire::test('pages::admin.bookings')
+        ->set('from', '2027-03-10')
+        ->set('until', '2027-03-11');
+
+    expect($page->get('bookings')->pluck('id')->all())->toBe([$straddling->id]);
+});
+
+test('a multi-night stay running across the filter window still shows up in it', function () {
+    $room = Room::factory()->withRates([24 => 2500])->create();
+
+    $straddling = RoomBooking::factory()->for($room)->overnight(5)->create([
+        'starts_at' => Carbon::parse('2027-03-08')->setTime(14, 0),
+    ]);
+
+    $page = Livewire::test('pages::admin.bookings')
+        ->call('showType', 'rooms')
+        ->set('from', '2027-03-10')
+        ->set('until', '2027-03-11');
+
+    expect($page->get('bookings')->pluck('id')->all())->toBe([$straddling->id]);
+});
+
+test('the halls and catering tabs list their date ranges', function () {
+    Booking::factory()->for($this->hall)->spanningDays(3)->create(['start_date' => '2027-03-10']);
+
+    Livewire::test('pages::admin.bookings')
+        ->assertSee('Mar 10–12, 2027')
+        ->assertSee('3 days');
 });
 
 test('the status chips show how many bookings sit in each state', function () {
@@ -152,7 +190,7 @@ test('the balance can be recorded as paid, but only once', function () {
 
 test('cancelling frees the slot for a new booking', function () {
     $booking = Booking::factory()->for($this->hall)->create([
-        'booking_date' => '2027-05-01',
+        'start_date' => '2027-05-01',
         'start_hour' => 8,
         'end_hour' => 12,
         'status' => BookingStatus::Pending,
@@ -352,9 +390,9 @@ test('catering orders can be filtered by package and event date', function () {
     $mezze = CateringPackage::factory()->create(['name' => 'Mezze']);
     $other = CateringPackage::factory()->create(['name' => 'Other']);
 
-    CateringOrder::factory()->for($mezze, 'package')->create(['event_date' => '2027-07-10']);
-    CateringOrder::factory()->for($mezze, 'package')->create(['event_date' => '2027-08-10']);
-    CateringOrder::factory()->for($other, 'package')->create(['event_date' => '2027-07-10']);
+    CateringOrder::factory()->for($mezze, 'package')->create(['start_date' => '2027-07-10']);
+    CateringOrder::factory()->for($mezze, 'package')->create(['start_date' => '2027-08-10']);
+    CateringOrder::factory()->for($other, 'package')->create(['start_date' => '2027-07-10']);
 
     $page = Livewire::test('pages::admin.bookings')->call('showType', 'catering');
 

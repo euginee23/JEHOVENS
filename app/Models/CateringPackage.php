@@ -95,14 +95,19 @@ class CateringPackage extends Model implements Photographable
     /**
      * Price an order for the given head count, in whole pesos.
      *
+     * `$guests` is the head count served on each day and `$days` is how many days the
+     * order runs for, so a multi-day order is catered — and skirted — afresh each day.
+     *
      * The downpayment is rounded up so the resort is never short a peso on an odd total.
      *
      * @return array{catering_total: int, skirting_total: int, total: int, downpayment: int, balance: int}
      */
-    public function quote(int $guests, bool $includeSkirting): array
+    public function quote(int $guests, bool $includeSkirting, int $days = 1): array
     {
-        $cateringTotal = $this->price_per_head * $guests;
-        $skirtingTotal = $includeSkirting ? $this->skirting_price : 0;
+        $days = max($days, 1);
+
+        $cateringTotal = $this->price_per_head * $guests * $days;
+        $skirtingTotal = $includeSkirting ? $this->skirting_price * $days : 0;
         $total = $cateringTotal + $skirtingTotal;
         $downpayment = (int) ceil($total * self::DOWNPAYMENT_RATE);
 

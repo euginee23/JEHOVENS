@@ -1,23 +1,24 @@
 <?php
 
 use App\Enums\BookingStatus;
+use App\Livewire\BooksDateRangeComponent;
 use App\Models\Booking;
 use App\Models\Hall;
+use App\Support\Availability;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
-use Livewire\Component;
 
 new
 #[Layout('layouts::marketing')]
 #[Title('Book a Function Hall')]
-class extends Component {
+class extends BooksDateRangeComponent {
     public ?int $hall_id = null;
-
-    public string $booking_date = '';
 
     public ?int $start_hour = null;
 
@@ -52,6 +53,19 @@ class extends Component {
             $this->guest_name = $user->name;
             $this->guest_email = $user->email;
         }
+
+        $this->discardUnusableDate();
+    }
+
+    /**
+     * Which dates the chosen hall is already spoken for. Nothing is closed off until a
+     * hall is picked, since availability is per hall.
+     */
+    protected function availabilityFor(CarbonInterface $from, CarbonInterface $until): Availability
+    {
+        return $this->hall_id
+            ? Availability::forHall($this->hall_id, $from, $until)
+            : Availability::none();
     }
 
     /**
@@ -63,7 +77,8 @@ class extends Component {
     {
         return [
             'hall_id' => ['required', 'integer', 'exists:halls,id'],
-            'booking_date' => ['required', 'date', 'after_or_equal:today'],
+            'start_date' => ['required', 'date', 'after_or_equal:today'],
+            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'start_hour' => ['required', 'integer', 'min:'.Hall::OPENS_AT, 'max:'.(Hall::CLOSES_AT - Hall::HOURS_PER_BLOCK)],
             'end_hour' => [
                 'required',
@@ -96,7 +111,9 @@ class extends Component {
     {
         return [
             'hall_id.required' => __('Choose a function hall first.'),
-            'booking_date.after_or_equal' => __('Pick a date from today onwards.'),
+            'start_date.required' => __('Pick your dates on the calendar.'),
+            'start_date.after_or_equal' => __('Pick a date from today onwards.'),
+            'end_date.after_or_equal' => __('The last day cannot come before the first.'),
             'end_hour.gt' => __('The end time has to be after the start time.'),
             'guest_phone.regex' => __('Enter an 11-digit mobile number starting with 09, e.g. 09123456789.'),
         ];
@@ -130,11 +147,11 @@ class extends Component {
     #[Computed]
     public function quote(): ?array
     {
-        if (! $this->hall || ! $this->hours) {
+        if (! $this->hall || ! $this->hours || ! $this->hasDateRange()) {
             return null;
         }
 
-        return $this->hall->quote($this->hours, $this->include_skirting);
+        return $this->hall->quote($this->hours, $this->include_skirting, $this->days);
     }
 
     /**
@@ -210,6 +227,9 @@ class extends Component {
     {
         $this->hall_id = $hallId;
         $this->resetValidation('hall_id');
+
+        // Availability is per hall, so the calendar has to be rebuilt for the new one.
+        unset($this->availability);
     }
 
     /**
@@ -237,23 +257,30 @@ class extends Component {
     public function confirmPayment(): void
     {
         $validated = $this->validate();
-        $this->assertSlotIsAvailable();
 
-        $hall = $this->hall;
-        $quote = $hall->quote($this->hours, $this->include_skirting);
+        $quote = $this->hall->quote($this->hours, $this->include_skirting, $this->days);
 
-        $booking = Booking::create([
-            ...$validated,
-            'reference' => Booking::generateReference(),
-            'user_id' => Auth::id(),
-            'hours' => $this->hours,
-            'rent_total' => $quote['rent_total'],
-            'skirting_total' => $quote['skirting_total'],
-            'total' => $quote['total'],
-            'downpayment' => $quote['downpayment'],
-            'balance' => $quote['balance'],
-            'status' => BookingStatus::Pending,
-        ]);
+        // Two guests can reach this point for the same slot at once, so the last check
+        // runs inside the transaction that writes the booking, holding the rows it read.
+        $booking = DB::transaction(function () use ($validated, $quote) {
+            $this->assertSlotIsAvailable(lock: true);
+
+            return Booking::create([
+                ...$validated,
+                'reference' => Booking::generateReference(),
+                'user_id' => Auth::id(),
+                'hours' => $this->hours,
+                'days' => $this->days,
+                'rent_total' => $quote['rent_total'],
+                'skirting_total' => $quote['skirting_total'],
+                'total' => $quote['total'],
+                'downpayment' => $quote['downpayment'],
+                'balance' => $quote['balance'],
+                'status' => BookingStatus::Pending,
+            ]);
+        });
+
+        $booking->sendPlacementNotifications();
 
         $this->showPayment = false;
         $this->reference = $booking->reference;
@@ -264,29 +291,39 @@ class extends Component {
      */
     public function bookAnother(): void
     {
-        $this->reset(['hall_id', 'booking_date', 'start_hour', 'end_hour', 'reference', 'showPayment']);
+        $this->reset(['hall_id', 'start_hour', 'end_hour', 'reference', 'showPayment']);
+        $this->resetDateRange();
         $this->include_skirting = true;
         $this->mount();
     }
 
     /**
-     * Reject the slot if a pending or confirmed booking already overlaps it.
+     * Reject the booking if an existing one already overlaps any day of it.
+     *
+     * The same hours are held on every day of a range, so a clash is a range that
+     * overlaps on dates *and* on hours.
      */
-    protected function assertSlotIsAvailable(): void
+    protected function assertSlotIsAvailable(bool $lock = false): void
     {
-        $clashes = Booking::query()
+        $query = Booking::query()
             ->blocking()
             ->where('hall_id', $this->hall_id)
-            ->whereDate('booking_date', $this->booking_date)
+            ->whereDate('start_date', '<=', $this->end_date)
+            ->whereDate('end_date', '>=', $this->start_date)
             ->where('start_hour', '<', $this->end_hour)
-            ->where('end_hour', '>', $this->start_hour)
-            ->exists();
+            ->where('end_hour', '>', $this->start_hour);
 
-        if ($clashes) {
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        if ($query->exists()) {
             $this->showPayment = false;
 
+            unset($this->availability);
+
             throw ValidationException::withMessages([
-                'booking_date' => __('That hall is already booked for part of this time slot. Please pick another time or date.'),
+                'start_date' => __('That hall is already booked for part of this time slot. Please pick another time or date.'),
             ]);
         }
     }
@@ -342,8 +379,11 @@ class extends Component {
                             $rows = [
                                 __('Reference') => $booking->reference,
                                 __('Hall') => $booking->hall->name,
-                                __('Date') => $booking->booking_date->format('F j, Y'),
-                                __('Time') => $this->formatHour($booking->start_hour).' – '.$this->formatHour($booking->end_hour).' ('.trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours]).')',
+                                trans_choice('{1} Date|[2,*] Dates', $booking->days) => \App\Support\DateRange::label($booking->start_date, $booking->end_date)
+                                    .($booking->days > 1 ? ' ('.trans_choice('{1} :count day|[2,*] :count days', $booking->days, ['count' => $booking->days]).')' : ''),
+                                __('Time') => $this->formatHour($booking->start_hour).' – '.$this->formatHour($booking->end_hour)
+                                    .' ('.trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours])
+                                    .($booking->days > 1 ? __(' each day') : '').')',
                                 __('Name') => $booking->guest_name,
                                 __('Phone') => $booking->guest_phone,
                                 __('Email') => $booking->guest_email,
@@ -511,13 +551,36 @@ class extends Component {
                         ] : []"
                     />
                     <form wire:submit="proceedToPayment" class="mt-6 space-y-6">
-                        <flux:input
-                            wire:model.live="booking_date"
-                            :label="__('Select date')"
-                            type="date"
-                            :min="now()->toDateString()"
-                            required
-                        />
+                        <div>
+                            <x-booking.availability-calendar
+                                :month="$this->calendar"
+                                :start="$start_date"
+                                :end="$end_date"
+                                :availability="$this->availability"
+                                :label="__('Select your dates')"
+                                :hint="$this->hall
+                                    ? __('Tap a day to book it. Tap a later day to run the event across several days.')
+                                    : __('Pick a hall first to see which dates are still open.')"
+                            />
+
+                            @if ($this->hasDateRange())
+                                <p class="mt-2 text-sm font-medium text-brand-900">
+                                    {{ $this->rangeLabel }}
+                                    @if ($this->days > 1)
+                                        <span class="text-brand-800/60">
+                                            {{ trans_choice('{1} · :count day|[2,*] · :count days', $this->days, ['count' => $this->days]) }}
+                                        </span>
+                                    @endif
+                                </p>
+                            @endif
+
+                            @error('start_date')
+                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
+                            @enderror
+                            @error('end_date')
+                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
+                            @enderror
+                        </div>
 
                         <div>
                             <div class="grid gap-4 sm:grid-cols-2">
@@ -541,13 +604,18 @@ class extends Component {
 
                             <p class="mt-2 text-xs text-brand-800/60">
                                 {{ __('Open 7:00 AM to 10:00 PM. Halls are rented in blocks of 4 hours.') }}
+                                @if ($this->days > 1)
+                                    {{ __('These hours are held on each of your :count days.', ['count' => $this->days]) }}
+                                @endif
                             </p>
                         </div>
 
                         <flux:switch
                             wire:model.live="include_skirting"
                             :label="__('Include skirting')"
-                            :description="__('One-time skirting and setup fee.')"
+                            :description="$this->days > 1
+                                ? __('Skirting and setup, charged for each day of your booking.')
+                                : __('One-time skirting and setup fee.')"
                         />
 
                         <flux:separator variant="subtle" />
@@ -573,17 +641,27 @@ class extends Component {
                                 <dl class="mt-4 space-y-2.5 text-sm">
                                     <div class="flex justify-between gap-4">
                                         <dt class="text-brand-800/70">
-                                            {{ __('Rent (₱:rate × :blocks)', [
-                                                'rate' => number_format($this->hall->rent_price),
-                                                'blocks' => trans_choice('{1} :count block|[2,*] :count blocks', $this->quote['blocks'], ['count' => $this->quote['blocks']]),
-                                            ]) }}
+                                            {{ $this->days > 1
+                                                ? __('Rent (₱:rate × :blocks × :days)', [
+                                                    'rate' => number_format($this->hall->rent_price),
+                                                    'blocks' => trans_choice('{1} :count block|[2,*] :count blocks', $this->quote['blocks'], ['count' => $this->quote['blocks']]),
+                                                    'days' => trans_choice('{1} :count day|[2,*] :count days', $this->days, ['count' => $this->days]),
+                                                ])
+                                                : __('Rent (₱:rate × :blocks)', [
+                                                    'rate' => number_format($this->hall->rent_price),
+                                                    'blocks' => trans_choice('{1} :count block|[2,*] :count blocks', $this->quote['blocks'], ['count' => $this->quote['blocks']]),
+                                                ]) }}
                                         </dt>
                                         <dd class="font-medium text-brand-900">₱{{ number_format($this->quote['rent_total']) }}</dd>
                                     </div>
 
                                     @if ($this->quote['skirting_total'] > 0)
                                         <div class="flex justify-between gap-4">
-                                            <dt class="text-brand-800/70">{{ __('Skirting and setup') }}</dt>
+                                            <dt class="text-brand-800/70">
+                                                {{ $this->days > 1
+                                                    ? __('Skirting and setup (× :days)', ['days' => trans_choice('{1} :count day|[2,*] :count days', $this->days, ['count' => $this->days])])
+                                                    : __('Skirting and setup') }}
+                                            </dt>
                                             <dd class="font-medium text-brand-900">₱{{ number_format($this->quote['skirting_total']) }}</dd>
                                         </div>
                                     @endif

@@ -103,15 +103,22 @@ class extends Component {
     }
 
     /**
-     * The column holding the date of the event or stay.
+     * The column holding the first day of the event or stay.
      */
     protected function dateColumn(): string
     {
-        return match ($this->type) {
-            'rooms' => 'starts_at',
-            'catering' => 'event_date',
-            default => 'booking_date',
-        };
+        return $this->showingRooms() ? 'starts_at' : 'start_date';
+    }
+
+    /**
+     * The column holding the last day of the event or stay.
+     *
+     * Bookings span a range now, so a date filter has to match anything that overlaps the
+     * window rather than only those that begin inside it.
+     */
+    protected function endDateColumn(): string
+    {
+        return $this->showingRooms() ? 'ends_at' : 'end_date';
     }
 
     /**
@@ -176,7 +183,8 @@ class extends Component {
             })
             ->when($this->status !== '', fn (Builder $q) => $q->where('status', $this->status))
             ->when($this->venue !== '', fn (Builder $q) => $q->where($this->venueColumn(), $this->venue))
-            ->when($this->from !== '', fn (Builder $q) => $q->whereDate($this->dateColumn(), '>=', $this->from))
+            // Overlap, not containment: a booking running across the window shows up in it.
+            ->when($this->from !== '', fn (Builder $q) => $q->whereDate($this->endDateColumn(), '>=', $this->from))
             ->when($this->until !== '', fn (Builder $q) => $q->whereDate($this->dateColumn(), '<=', $this->until))
             ->orderByDesc($this->dateColumn())
             ->orderByDesc('id')
@@ -493,11 +501,20 @@ class extends Component {
                                     {{-- Catering has no `hours` column; it is priced per head. --}}
                                     <span class="block text-xs text-zinc-500">
                                         @if ($this->showingCatering())
-                                            {{ $row->event_date->format('M j, Y') }}
+                                            {{ \App\Support\DateRange::shortLabel($row->start_date, $row->end_date) }}
                                             · {{ trans_choice('{1} :count guest|[2,*] :count guests', $row->guests, ['count' => number_format($row->guests)]) }}
+                                            @if ($row->days > 1)
+                                                · {{ trans_choice('{1} :count day|[2,*] :count days', $row->days, ['count' => $row->days]) }}
+                                            @endif
+                                        @elseif ($this->showingRooms())
+                                            {{ $row->starts_at->format('M j, Y · g:i A') }}
+                                            · {{ $row->stayLabel() }}
                                         @else
-                                            {{ $this->showingRooms() ? $row->starts_at->format('M j, Y · g:i A') : $row->booking_date->format('M j, Y') }}
+                                            {{ \App\Support\DateRange::shortLabel($row->start_date, $row->end_date) }}
                                             · {{ trans_choice('{1} :count hour|[2,*] :count hours', $row->hours, ['count' => $row->hours]) }}
+                                            @if ($row->days > 1)
+                                                · {{ trans_choice('{1} :count day|[2,*] :count days', $row->days, ['count' => $row->days]) }}
+                                            @endif
                                         @endif
                                     </span>
                                 </td>
@@ -572,19 +589,22 @@ class extends Component {
 
                 $when = match (true) {
                     $isRoom => [
+                        __('Stay') => $b->stayLabel(),
                         __('Check-in') => $b->starts_at->format('l, F j, Y \a\t g:i A'),
                         __('Check-out') => $b->ends_at->format('l, F j, Y \a\t g:i A'),
                         __('Arrive by') => $b->arriveBy()->format('g:i A'),
                     ],
                     $isCatering => [
-                        __('Event date') => $b->event_date->format('l, F j, Y'),
-                        __('Guests') => number_format($b->guests),
+                        trans_choice('{1} Event date|[2,*] Event dates', $b->days) => \App\Support\DateRange::label($b->start_date, $b->end_date),
+                        __('Days') => number_format($b->days),
+                        $b->days > 1 ? __('Guests per day') : __('Guests') => number_format($b->guests),
                         __('Per head') => '₱'.number_format($b->price_per_head),
                         __('Skirting') => $b->include_skirting ? __('Included') : __('Not included'),
                     ],
                     default => [
-                        __('Date') => $b->booking_date->format('l, F j, Y'),
-                        __('Time') => sprintf('%d:00 %s – %d:00 %s', $b->start_hour % 12 ?: 12, $b->start_hour >= 12 ? 'PM' : 'AM', $b->end_hour % 12 ?: 12, $b->end_hour >= 12 ? 'PM' : 'AM'),
+                        trans_choice('{1} Date|[2,*] Dates', $b->days) => \App\Support\DateRange::label($b->start_date, $b->end_date),
+                        __('Days') => number_format($b->days),
+                        $b->days > 1 ? __('Time each day') : __('Time') => sprintf('%d:00 %s – %d:00 %s', $b->start_hour % 12 ?: 12, $b->start_hour >= 12 ? 'PM' : 'AM', $b->end_hour % 12 ?: 12, $b->end_hour >= 12 ? 'PM' : 'AM'),
                     ],
                 };
 

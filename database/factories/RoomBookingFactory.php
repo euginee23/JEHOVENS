@@ -14,6 +14,11 @@ use Illuminate\Support\Carbon;
 class RoomBookingFactory extends Factory
 {
     /**
+     * What overnight() charges per night, matching the 24-hour rate RoomFactory seeds.
+     */
+    private const NIGHTLY_PRICE = 2500;
+
+    /**
      * Define the model's default state.
      *
      * @return array<string, mixed>
@@ -35,12 +40,39 @@ class RoomBookingFactory extends Factory
             'starts_at' => $startsAt,
             'ends_at' => $startsAt->copy()->addHours($hours),
             'hours' => $hours,
+
+            // Zero nights is a day-use booking; overnight() sets this and the columns
+            // that follow from it.
+            'nights' => 0,
             'pay_in_full' => false,
             'total' => $total,
             'amount_paid' => (int) ceil($total * Room::DOWNPAYMENT_RATE),
             'balance' => $total - (int) ceil($total * Room::DOWNPAYMENT_RATE),
             'status' => BookingStatus::Pending,
         ];
+    }
+
+    /**
+     * Indicate that the guest is staying the night rather than booking by the hour.
+     *
+     * The derived columns are filled in afterMaking so an explicit `starts_at` passed to
+     * create() is the one the stay is measured from.
+     */
+    public function overnight(int $nights = 2): static
+    {
+        return $this->state(['nights' => $nights])
+            ->afterMaking(function (RoomBooking $booking) use ($nights) {
+                $total = self::NIGHTLY_PRICE * $nights;
+                $paid = $booking->pay_in_full ? $total : (int) ceil($total * Room::DOWNPAYMENT_RATE);
+
+                $booking->forceFill([
+                    'hours' => $nights * Room::HOURS_PER_NIGHT,
+                    'ends_at' => $booking->starts_at->copy()->addDays($nights),
+                    'total' => $total,
+                    'amount_paid' => $paid,
+                    'balance' => $total - $paid,
+                ]);
+            });
     }
 
     /**

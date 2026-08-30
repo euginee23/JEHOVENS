@@ -51,6 +51,11 @@ class Room extends Model implements Photographable
     public const ARRIVE_EARLY_MINUTES = 30;
 
     /**
+     * The length of a rate that counts as an overnight stay rather than day use.
+     */
+    public const HOURS_PER_NIGHT = 24;
+
+    /**
      * The share of the total a guest pays up front when not paying in full.
      */
     public const DOWNPAYMENT_RATE = 0.5;
@@ -110,15 +115,38 @@ class Room extends Model implements Photographable
     }
 
     /**
-     * Split a rate into what is due now and what is left to pay on arrival.
+     * The rate this room charges for a night, if it sells one.
+     *
+     * Overnight stays are priced per night at the room's 24-hour rate, so a room without
+     * one can only be booked for the day.
+     */
+    public function overnightRate(): ?RoomRate
+    {
+        return $this->rates->first(fn (RoomRate $rate) => $rate->hours >= self::HOURS_PER_NIGHT);
+    }
+
+    /**
+     * Whether guests can stay the night in this room.
+     */
+    public function sellsOvernightStays(): bool
+    {
+        return $this->overnightRate() !== null;
+    }
+
+    /**
+     * Split a stay into what is due now and what is left to pay on arrival.
+     *
+     * `$nights` is zero for a day-use booking, which is charged the given rate once. For
+     * an overnight stay it is the number of nights, and `$rate` should be the room's
+     * `overnightRate()` — charged once per night.
      *
      * The amount due is rounded up so the resort is never short a peso on an odd total.
      *
      * @return array{total: int, amount_paid: int, balance: int}
      */
-    public function quote(RoomRate $rate, bool $payInFull): array
+    public function quote(RoomRate $rate, bool $payInFull, int $nights = 0): array
     {
-        $total = $rate->price;
+        $total = $rate->price * max($nights, 1);
         $amountPaid = $payInFull ? $total : (int) ceil($total * self::DOWNPAYMENT_RATE);
 
         return [

@@ -31,7 +31,12 @@ class BookingFactory extends Factory
             'guest_name' => fake()->name(),
             'guest_phone' => '09'.fake()->numerify('#########'),
             'guest_email' => fake()->unique()->safeEmail(),
-            'booking_date' => fake()->dateTimeBetween('+1 day', '+2 months')->format('Y-m-d'),
+            'start_date' => fake()->dateTimeBetween('+1 day', '+2 months')->format('Y-m-d'),
+
+            // Left for configure() to work out from `days`, so a test overriding only
+            // `start_date` still gets a coherent range.
+            'end_date' => null,
+            'days' => 1,
             'start_hour' => $startHour,
             'end_hour' => $startHour + $hours,
             'hours' => $hours,
@@ -41,12 +46,17 @@ class BookingFactory extends Factory
     }
 
     /**
-     * Fill the money columns from the hall's own pricing once it is resolved.
+     * Settle the date range, then fill the money columns from the hall's own pricing.
      */
     public function configure(): static
     {
         return $this->afterMaking(function (Booking $booking) {
-            $quote = $booking->hall->quote($booking->hours, $booking->include_skirting);
+            // Both ends are settled here rather than in a state, so an explicit
+            // `start_date` passed to create() is the one the range is measured from.
+            $booking->end_date ??= $booking->start_date->copy()->addDays(max($booking->days, 1) - 1);
+            $booking->days = (int) $booking->start_date->diffInDays($booking->end_date) + 1;
+
+            $quote = $booking->hall->quote($booking->hours, $booking->include_skirting, $booking->days);
 
             $booking->forceFill([
                 'rent_total' => $quote['rent_total'],
@@ -56,6 +66,17 @@ class BookingFactory extends Factory
                 'balance' => $quote['balance'],
             ]);
         });
+    }
+
+    /**
+     * Indicate that the event runs across several consecutive days.
+     */
+    public function spanningDays(int $days): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'days' => $days,
+            'end_date' => null,
+        ]);
     }
 
     /**

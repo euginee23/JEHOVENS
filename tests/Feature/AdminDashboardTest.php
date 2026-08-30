@@ -80,7 +80,7 @@ test('upcoming counts the next seven days and excludes cancelled', function () {
         'ends_at' => now()->addDays(30)->addHours(6),
     ]);
 
-    Booking::factory()->create(['booking_date' => now()->addDay()->toDateString()]);
+    Booking::factory()->create(['start_date' => now()->addDay()->toDateString()]);
 
     expect(Livewire::test('pages::admin.dashboard')->get('upcoming'))->toBe(2);
 });

@@ -62,6 +62,10 @@ class extends Component {
 
     /**
      * Reservations happening in the next seven days that still hold their slot.
+     *
+     * Reservations span a range of days, so this counts anything running across the week
+     * rather than only those that begin inside it — a booking that started yesterday and
+     * runs until Friday is very much still upcoming.
      */
     #[Computed]
     public function upcoming(): int
@@ -69,9 +73,9 @@ class extends Component {
         $from = now()->startOfDay();
         $until = now()->addWeek()->endOfDay();
 
-        return Booking::query()->blocking()->whereBetween('booking_date', [$from, $until])->count()
-            + RoomBooking::query()->blocking()->whereBetween('starts_at', [$from, $until])->count()
-            + CateringOrder::query()->blocking()->whereBetween('event_date', [$from, $until])->count();
+        return Booking::query()->blocking()->where('start_date', '<=', $until)->where('end_date', '>=', $from)->count()
+            + RoomBooking::query()->blocking()->where('starts_at', '<=', $until)->where('ends_at', '>=', $from)->count()
+            + CateringOrder::query()->blocking()->where('start_date', '<=', $until)->where('end_date', '>=', $from)->count();
     }
 
     /**

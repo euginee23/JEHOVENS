@@ -1,31 +1,36 @@
 <?php
 
 use App\Enums\BookingStatus;
+use App\Livewire\BooksDateRangeComponent;
 use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\RoomRate;
+use App\Support\Availability;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Url;
-use Livewire\Component;
 
 new
 #[Layout('layouts::marketing')]
 #[Title('Book a Room')]
-class extends Component {
+class extends BooksDateRangeComponent {
     public ?int $room_id = null;
-
-    #[Url(as: 'date')]
-    public string $checkin_date = '';
 
     #[Url(as: 'entry')]
     public ?int $entry_hour = null;
 
+    /**
+     * The day-use duration the guest picked. Only asked for when they are not staying
+     * the night — an overnight stay is always sold at the room's 24-hour rate.
+     */
     public ?int $rate_id = null;
 
     /**
@@ -80,15 +85,21 @@ class extends Component {
      */
     protected function discardUnusableSearch(): void
     {
-        $checkinDate = rescue(fn () => Carbon::parse($this->checkin_date), null, report: false);
-
-        if ($this->checkin_date !== '' && (! $checkinDate || $checkinDate->isBefore(today()))) {
-            $this->checkin_date = '';
-        }
+        $this->discardUnusableDate();
 
         if ($this->entry_hour !== null && ($this->entry_hour < Room::ENTRY_OPENS_AT || $this->entry_hour > Room::ENTRY_CLOSES_AT)) {
             $this->entry_hour = null;
         }
+    }
+
+    /**
+     * Which dates the chosen room is already taken for.
+     */
+    protected function availabilityFor(CarbonInterface $from, CarbonInterface $until): Availability
+    {
+        return $this->room_id
+            ? Availability::forRoom($this->room_id, $from, $until)
+            : Availability::none();
     }
 
     /**
@@ -100,10 +111,23 @@ class extends Component {
     {
         return [
             'room_id' => ['required', 'integer', 'exists:rooms,id'],
-            'checkin_date' => ['required', 'date', 'after_or_equal:today'],
-            'entry_hour' => ['required', 'integer', 'min:'.Room::ENTRY_OPENS_AT, 'max:'.Room::ENTRY_CLOSES_AT],
-            'rate_id' => [
+            'start_date' => ['required', 'date', 'after_or_equal:today'],
+            'end_date' => [
                 'required',
+                'date',
+                'after_or_equal:start_date',
+                function (string $attribute, mixed $value, callable $fail) {
+                    if ($this->nights > 0 && $this->room && ! $this->room->sellsOvernightStays()) {
+                        $fail(__('This room is for day use only. Pick a single day, or choose another room to stay the night.'));
+                    }
+                },
+            ],
+            'entry_hour' => ['required', 'integer', 'min:'.Room::ENTRY_OPENS_AT, 'max:'.Room::ENTRY_CLOSES_AT],
+
+            // Only day-use stays need a duration; overnight ones are sold by the night.
+            'rate_id' => [
+                Rule::requiredIf(fn () => $this->nights === 0),
+                'nullable',
                 'integer',
                 function (string $attribute, mixed $value, callable $fail) {
                     if ($this->room_id && ! RoomRate::where('id', $value)->where('room_id', $this->room_id)->exists()) {
@@ -127,7 +151,9 @@ class extends Component {
     {
         return [
             'room_id.required' => __('Choose a room first.'),
-            'checkin_date.after_or_equal' => __('Pick a check-in date from today onwards.'),
+            'start_date.required' => __('Pick your dates on the calendar.'),
+            'start_date.after_or_equal' => __('Pick a check-in date from today onwards.'),
+            'end_date.after_or_equal' => __('Check-out cannot come before check-in.'),
             'entry_hour.required' => __('Choose your time of entry.'),
             'rate_id.required' => __('Choose how long you are staying.'),
             'guest_phone.regex' => __('Enter an 11-digit mobile number starting with 09, e.g. 09123456789.'),
@@ -155,23 +181,58 @@ class extends Component {
     }
 
     /**
-     * The duration the guest has selected, if any.
+     * Whether the guest is staying the night rather than booking the room for the day.
+     */
+    public function isOvernight(): bool
+    {
+        return $this->nights > 0;
+    }
+
+    /**
+     * The rate this stay is priced from.
+     *
+     * A day-use booking uses whichever duration the guest picked. An overnight stay is
+     * always sold at the room's 24-hour rate, charged once per night, so the duration
+     * selector is not shown and the rate is resolved here instead.
      */
     #[Computed]
     public function rate(): ?RoomRate
     {
-        return $this->room && $this->rate_id ? $this->room->rates->firstWhere('id', $this->rate_id) : null;
+        if (! $this->room) {
+            return null;
+        }
+
+        return $this->isOvernight()
+            ? $this->room->overnightRate()
+            : $this->room->rates->firstWhere('id', $this->rate_id);
     }
 
     /**
-     * The live price breakdown, once a room and duration are chosen.
+     * The live price breakdown, once a room and a length of stay are chosen.
      *
      * @return array{total: int, amount_paid: int, balance: int}|null
      */
     #[Computed]
     public function quote(): ?array
     {
-        return $this->room && $this->rate ? $this->room->quote($this->rate, $this->payingInFull()) : null;
+        return $this->room && $this->rate
+            ? $this->room->quote($this->rate, $this->payingInFull(), $this->nights)
+            : null;
+    }
+
+    /**
+     * How long the stay runs for in total, in hours.
+     */
+    #[Computed]
+    public function stayHours(): ?int
+    {
+        if (! $this->rate) {
+            return null;
+        }
+
+        return $this->isOvernight()
+            ? $this->nights * Room::HOURS_PER_NIGHT
+            : $this->rate->hours;
     }
 
     /**
@@ -231,7 +292,23 @@ class extends Component {
             ? $this->rooms->firstWhere('id', $roomId)?->rates->firstWhere('hours', $this->preferred_hours)?->id
             : null;
 
-        $this->resetValidation('room_id');
+        $this->resetValidation(['room_id', 'end_date', 'rate_id']);
+
+        // Availability is per room, so the calendar has to be rebuilt for the new one.
+        unset($this->availability, $this->rate, $this->quote, $this->stayHours);
+    }
+
+    /**
+     * Drop a day-use duration once the guest starts staying the night, so a stale rate
+     * never lingers behind the hidden selector.
+     */
+    protected function afterDateRangeChange(): void
+    {
+        if ($this->isOvernight()) {
+            $this->rate_id = null;
+        }
+
+        unset($this->rate, $this->quote, $this->stayHours);
     }
 
     /**
@@ -259,25 +336,32 @@ class extends Component {
     public function confirmPayment(): void
     {
         $this->validate();
-        $this->assertRoomIsAvailable();
 
-        $quote = $this->room->quote($this->rate, $this->payingInFull());
-        $startsAt = $this->startsAt();
+        $quote = $this->room->quote($this->rate, $this->payingInFull(), $this->nights);
 
-        $booking = RoomBooking::create([
-            'reference' => RoomBooking::generateReference(),
-            'room_id' => $this->room_id,
-            'user_id' => Auth::id(),
-            'guest_name' => $this->guest_name,
-            'guest_phone' => $this->guest_phone,
-            'guest_email' => $this->guest_email,
-            'starts_at' => $startsAt,
-            'ends_at' => $startsAt->copy()->addHours($this->rate->hours),
-            'hours' => $this->rate->hours,
-            'pay_in_full' => $this->payingInFull(),
-            ...$quote,
-            'status' => BookingStatus::Pending,
-        ]);
+        // Two guests can reach this point for the same room at once, so the last check
+        // runs inside the transaction that writes the booking, holding the rows it read.
+        $booking = DB::transaction(function () use ($quote) {
+            $this->assertRoomIsAvailable(lock: true);
+
+            return RoomBooking::create([
+                'reference' => RoomBooking::generateReference(),
+                'room_id' => $this->room_id,
+                'user_id' => Auth::id(),
+                'guest_name' => $this->guest_name,
+                'guest_phone' => $this->guest_phone,
+                'guest_email' => $this->guest_email,
+                'starts_at' => $this->startsAt(),
+                'ends_at' => $this->endsAt(),
+                'hours' => $this->stayHours,
+                'nights' => $this->nights,
+                'pay_in_full' => $this->payingInFull(),
+                ...$quote,
+                'status' => BookingStatus::Pending,
+            ]);
+        });
+
+        $booking->sendPlacementNotifications();
 
         $this->showPayment = false;
         $this->reference = $booking->reference;
@@ -288,42 +372,68 @@ class extends Component {
      */
     public function bookAnother(): void
     {
-        $this->reset(['room_id', 'checkin_date', 'entry_hour', 'rate_id', 'preferred_hours', 'payment_option', 'reference', 'showPayment']);
+        $this->reset(['room_id', 'entry_hour', 'rate_id', 'preferred_hours', 'payment_option', 'reference', 'showPayment']);
+        $this->resetDateRange();
         $this->mount();
     }
 
     /**
      * The start of the requested stay, or null while the date or time is missing.
      */
-    protected function startsAt(): ?Carbon
+    public function startsAt(): ?Carbon
     {
-        if ($this->checkin_date === '' || $this->entry_hour === null) {
+        if ($this->start_date === '' || $this->entry_hour === null) {
             return null;
         }
 
-        return Carbon::parse($this->checkin_date)->setTime($this->entry_hour, 0);
+        return Carbon::parse($this->start_date)->setTime($this->entry_hour, 0);
+    }
+
+    /**
+     * When the guest checks out.
+     *
+     * An overnight guest leaves at their entry time on the check-out date, so a stay
+     * from the 10th to the 13th entering at 2PM runs to 2PM on the 13th. A day-use guest
+     * leaves once their chosen block is up.
+     */
+    public function endsAt(): ?Carbon
+    {
+        $startsAt = $this->startsAt();
+
+        if (! $startsAt || ! $this->rate) {
+            return null;
+        }
+
+        return $this->isOvernight()
+            ? $startsAt->copy()->addDays($this->nights)
+            : $startsAt->copy()->addHours($this->rate->hours);
     }
 
     /**
      * Reject the stay if a pending or confirmed booking already overlaps it.
+     *
+     * The comparison is half-open on both ends, so one guest checking out at the same
+     * hour another checks in is not a clash.
      */
-    protected function assertRoomIsAvailable(): void
+    protected function assertRoomIsAvailable(bool $lock = false): void
     {
-        $startsAt = $this->startsAt();
-        $endsAt = $startsAt->copy()->addHours($this->rate->hours);
-
-        $clashes = RoomBooking::query()
+        $query = RoomBooking::query()
             ->blocking()
             ->where('room_id', $this->room_id)
-            ->where('starts_at', '<', $endsAt)
-            ->where('ends_at', '>', $startsAt)
-            ->exists();
+            ->where('starts_at', '<', $this->endsAt())
+            ->where('ends_at', '>', $this->startsAt());
 
-        if ($clashes) {
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
+        if ($query->exists()) {
             $this->showPayment = false;
 
+            unset($this->availability);
+
             throw ValidationException::withMessages([
-                'checkin_date' => __('That room is taken for part of this stay. Please pick another time, date, or room.'),
+                'start_date' => __('That room is taken for part of this stay. Please pick another time, date, or room.'),
             ]);
         }
     }
@@ -376,9 +486,10 @@ class extends Component {
                             $rows = [
                                 __('Reference') => $booking->reference,
                                 __('Room') => $booking->room->name,
+                                __('Stay') => $booking->stayLabel(),
                                 __('Check-in') => $booking->starts_at->format('F j, Y \a\t g:i A'),
                                 __('Check-out') => $booking->ends_at->format('F j, Y \a\t g:i A'),
-                                __('Duration') => trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours]),
+                                __('Length') => trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours]),
                                 __('Name') => $booking->guest_name,
                                 __('Phone') => $booking->guest_phone,
                                 __('Email') => $booking->guest_email,
@@ -543,13 +654,25 @@ class extends Component {
                             : []"
                     />
                     <form wire:submit="proceedToPayment" class="mt-6 space-y-6">
-                        <flux:input
-                            wire:model.live="checkin_date"
-                            :label="__('Check-in date')"
-                            type="date"
-                            :min="now()->toDateString()"
-                            required
-                        />
+                        <div>
+                            <x-booking.availability-calendar
+                                :month="$this->calendar"
+                                :start="$start_date"
+                                :end="$end_date"
+                                :availability="$this->availability"
+                                :label="__('Check-in and check-out')"
+                                :hint="$this->room
+                                    ? __('Tap one day to book the room for the day. Tap a later day to stay the night.')
+                                    : __('Pick a room first to see which dates are still open.')"
+                            />
+
+                            @error('start_date')
+                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
+                            @enderror
+                            @error('end_date')
+                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
+                            @enderror
+                        </div>
 
                         <flux:select wire:model.live="entry_hour" :label="__('Time of entry')" :placeholder="__('Select entry time')">
                             @foreach ($this->entryHours as $hour => $label)
@@ -557,20 +680,60 @@ class extends Component {
                             @endforeach
                         </flux:select>
 
-                        <flux:select
-                            wire:model.live="rate_id"
-                            :label="__('Duration')"
-                            :placeholder="$this->room ? __('Select hours') : __('Pick a room first')"
-                            :disabled="! $this->room"
-                        >
-                            @if ($this->room)
-                                @foreach ($this->room->rates as $rate)
-                                    <flux:select.option wire:key="rate-{{ $rate->id }}" :value="$rate->id">
-                                        {{ $rate->label() }} — ₱{{ number_format($rate->price) }}
-                                    </flux:select.option>
-                                @endforeach
-                            @endif
-                        </flux:select>
+                        {{-- Day use is sold by the hour block; a stay over one or more nights
+                             is always sold at the room's nightly rate, so the duration
+                             selector only makes sense for the former. --}}
+                        @if (! $this->isOvernight())
+                            <flux:select
+                                wire:model.live="rate_id"
+                                :label="__('How long for')"
+                                :placeholder="$this->room ? __('Select hours') : __('Pick a room first')"
+                                :disabled="! $this->room"
+                            >
+                                @if ($this->room)
+                                    @foreach ($this->room->rates as $rate)
+                                        <flux:select.option wire:key="rate-{{ $rate->id }}" :value="$rate->id">
+                                            {{ $rate->label() }} — ₱{{ number_format($rate->price) }}
+                                        </flux:select.option>
+                                    @endforeach
+                                @endif
+                            </flux:select>
+                        @endif
+
+                        {{-- What the guest has actually chosen, spelled out. The old form only
+                             showed a duration, which left guests guessing when they had to be out. --}}
+                        @if ($this->startsAt() && $this->endsAt())
+                            <div class="border border-sand-200 bg-white p-4">
+                                <p class="eyebrow text-[10px] text-gold-600">
+                                    {{ $this->isOvernight() ? __('Overnight stay') : __('Day use') }}
+                                </p>
+
+                                <dl class="mt-3 space-y-2 text-sm">
+                                    <div class="flex justify-between gap-4">
+                                        <dt class="text-brand-800/60">{{ __('Check-in') }}</dt>
+                                        <dd class="text-right font-medium text-brand-900">
+                                            {{ $this->startsAt()->format('D, M j · g:i A') }}
+                                        </dd>
+                                    </div>
+
+                                    <div class="flex justify-between gap-4">
+                                        <dt class="text-brand-800/60">{{ __('Check-out') }}</dt>
+                                        <dd class="text-right font-medium text-brand-900">
+                                            {{ $this->endsAt()->format('D, M j · g:i A') }}
+                                        </dd>
+                                    </div>
+
+                                    <div class="flex justify-between gap-4 border-t border-sand-200 pt-2">
+                                        <dt class="text-brand-800/60">{{ __('Length') }}</dt>
+                                        <dd class="text-right font-medium text-brand-900">
+                                            {{ $this->isOvernight()
+                                                ? trans_choice('{1} :count night|[2,*] :count nights', $this->nights, ['count' => $this->nights])
+                                                : trans_choice('{1} :count hour|[2,*] :count hours', $this->stayHours, ['count' => $this->stayHours]) }}
+                                        </dd>
+                                    </div>
+                                </dl>
+                            </div>
+                        @endif
 
                         <flux:radio.group wire:model.live="payment_option" :label="__('Payment option')" variant="segmented">
                             <flux:radio value="downpayment" :label="__('Downpayment (50%)')" />
@@ -608,7 +771,14 @@ class extends Component {
 
                                 <dl class="mt-4 space-y-2.5 text-sm">
                                     <div class="flex justify-between gap-4">
-                                        <dt class="text-brand-800/70">{{ __('Room rate (:duration)', ['duration' => $this->rate->label()]) }}</dt>
+                                        <dt class="text-brand-800/70">
+                                            {{ $this->isOvernight()
+                                                ? __('Room rate (₱:price × :nights)', [
+                                                    'price' => number_format($this->rate->price),
+                                                    'nights' => trans_choice('{1} :count night|[2,*] :count nights', $this->nights, ['count' => $this->nights]),
+                                                ])
+                                                : __('Room rate (:duration)', ['duration' => $this->rate->label()]) }}
+                                        </dt>
                                         <dd class="font-medium text-brand-900">₱{{ number_format($this->quote['total']) }}</dd>
                                     </div>
 

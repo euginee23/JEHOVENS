@@ -1,22 +1,22 @@
 <?php
 
 use App\Enums\BookingStatus;
+use App\Livewire\BooksDateRangeComponent;
 use App\Models\CateringOrder;
 use App\Models\CateringPackage;
+use App\Support\Availability;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
-use Livewire\Component;
 
 new
 #[Layout('layouts::marketing')]
 #[Title('Order Catering')]
-class extends Component {
+class extends BooksDateRangeComponent {
     public ?int $package_id = null;
-
-    public string $event_date = '';
 
     public ?int $guests = null;
 
@@ -49,6 +49,19 @@ class extends Component {
             $this->guest_name = $user->name;
             $this->guest_email = $user->email;
         }
+
+        $this->discardUnusableDate();
+    }
+
+    /**
+     * Catering has no per-day capacity rule, so no date is ever closed off — the calendar
+     * is here to pick a run of days, not to rule any of them out.
+     */
+    protected function availabilityFor(CarbonInterface $from, CarbonInterface $until): Availability
+    {
+        return $this->package_id
+            ? Availability::forCateringPackage($this->package_id, $from, $until)
+            : Availability::none();
     }
 
     /**
@@ -60,7 +73,8 @@ class extends Component {
     {
         return [
             'package_id' => ['required', 'integer', 'exists:catering_packages,id'],
-            'event_date' => ['required', 'date', 'after_or_equal:today'],
+            'start_date' => ['required', 'date', 'after_or_equal:today'],
+            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'guests' => [
                 'required',
                 'integer',
@@ -89,7 +103,9 @@ class extends Component {
     {
         return [
             'package_id.required' => __('Choose a catering package first.'),
-            'event_date.after_or_equal' => __('Pick an event date from today onwards.'),
+            'start_date.required' => __('Pick your dates on the calendar.'),
+            'start_date.after_or_equal' => __('Pick an event date from today onwards.'),
+            'end_date.after_or_equal' => __('The last day cannot come before the first.'),
             'guests.required' => __('Tell us how many guests you are expecting.'),
             'guest_phone.regex' => __('Enter an 11-digit mobile number starting with 09, e.g. 09123456789.'),
         ];
@@ -123,11 +139,11 @@ class extends Component {
     #[Computed]
     public function quote(): ?array
     {
-        if (! $this->package || ! $this->guests || $this->guests < 1) {
+        if (! $this->package || ! $this->guests || $this->guests < 1 || ! $this->hasDateRange()) {
             return null;
         }
 
-        return $this->package->quote($this->guests, $this->include_skirting);
+        return $this->package->quote($this->guests, $this->include_skirting, $this->days);
     }
 
     /**
@@ -177,17 +193,20 @@ class extends Component {
         unset($validated['package_id']);
 
         $package = $this->package;
-        $quote = $package->quote($this->guests, $this->include_skirting);
+        $quote = $package->quote($this->guests, $this->include_skirting, $this->days);
 
         $order = CateringOrder::create([
             ...$validated,
             'catering_package_id' => $package->id,
             'reference' => CateringOrder::generateReference(),
             'user_id' => Auth::id(),
+            'days' => $this->days,
             'price_per_head' => $package->price_per_head,
             ...$quote,
             'status' => BookingStatus::Pending,
         ]);
+
+        $order->sendPlacementNotifications();
 
         $this->showPayment = false;
         $this->reference = $order->reference;
@@ -198,7 +217,8 @@ class extends Component {
      */
     public function orderAnother(): void
     {
-        $this->reset(['package_id', 'event_date', 'guests', 'reference', 'showPayment']);
+        $this->reset(['package_id', 'guests', 'reference', 'showPayment']);
+        $this->resetDateRange();
         $this->include_skirting = true;
         $this->mount();
     }
@@ -231,8 +251,9 @@ class extends Component {
                             $rows = [
                                 __('Reference') => $order->reference,
                                 __('Package') => $order->package->name,
-                                __('Event date') => $order->event_date->format('F j, Y'),
-                                __('Guests') => number_format($order->guests),
+                                trans_choice('{1} Event date|[2,*] Event dates', $order->days) => \App\Support\DateRange::label($order->start_date, $order->end_date)
+                                    .($order->days > 1 ? ' ('.trans_choice('{1} :count day|[2,*] :count days', $order->days, ['count' => $order->days]).')' : ''),
+                                $order->days > 1 ? __('Guests per day') : __('Guests') => number_format($order->guests),
                                 __('Name') => $order->guest_name,
                                 __('Phone') => $order->guest_phone,
                                 __('Email') => $order->guest_email,
@@ -407,17 +428,38 @@ class extends Component {
                         ] : []"
                     />
                     <form wire:submit="proceedToPayment" class="mt-6 space-y-6">
-                        <flux:input
-                            wire:model.live="event_date"
-                            :label="__('Event date')"
-                            type="date"
-                            :min="now()->toDateString()"
-                            required
-                        />
+                        <div>
+                            <x-booking.availability-calendar
+                                :month="$this->calendar"
+                                :start="$start_date"
+                                :end="$end_date"
+                                :availability="$this->availability"
+                                :label="__('Event dates')"
+                                :hint="__('Tap a day to order for it. Tap a later day to cater the same menu across several days.')"
+                            />
+
+                            @if ($this->hasDateRange())
+                                <p class="mt-2 text-sm font-medium text-brand-900">
+                                    {{ $this->rangeLabel }}
+                                    @if ($this->days > 1)
+                                        <span class="text-brand-800/60">
+                                            {{ trans_choice('{1} · :count day|[2,*] · :count days', $this->days, ['count' => $this->days]) }}
+                                        </span>
+                                    @endif
+                                </p>
+                            @endif
+
+                            @error('start_date')
+                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
+                            @enderror
+                            @error('end_date')
+                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
+                            @enderror
+                        </div>
 
                         <flux:input
                             wire:model.live.debounce.400ms="guests"
-                            :label="__('Number of guests')"
+                            :label="$this->days > 1 ? __('Number of guests per day') : __('Number of guests')"
                             type="number"
                             inputmode="numeric"
                             min="1"
@@ -430,9 +472,11 @@ class extends Component {
                         <flux:switch
                             wire:model.live="include_skirting"
                             :label="__('Include skirting')"
-                            :description="$this->package
-                                ? __('One-time skirting and setup fee (₱:price).', ['price' => number_format($this->package->skirting_price)])
-                                : __('One-time skirting and setup fee.')"
+                            :description="match (true) {
+                                $this->package && $this->days > 1 => __('Skirting and setup (₱:price), charged for each day.', ['price' => number_format($this->package->skirting_price)]),
+                                (bool) $this->package => __('One-time skirting and setup fee (₱:price).', ['price' => number_format($this->package->skirting_price)]),
+                                default => __('One-time skirting and setup fee.'),
+                            }"
                         />
 
                         <flux:separator variant="subtle" />
@@ -458,10 +502,16 @@ class extends Component {
                                 <dl class="mt-4 space-y-2.5 text-sm">
                                     <div class="flex justify-between gap-4">
                                         <dt class="text-brand-800/70">
-                                            {{ __('Catering (₱:rate × :guests)', [
-                                                'rate' => number_format($this->package->price_per_head),
-                                                'guests' => trans_choice('{1} :count guest|[2,*] :count guests', $guests, ['count' => number_format($guests)]),
-                                            ]) }}
+                                            {{ $this->days > 1
+                                                ? __('Catering (₱:rate × :guests × :days)', [
+                                                    'rate' => number_format($this->package->price_per_head),
+                                                    'guests' => trans_choice('{1} :count guest|[2,*] :count guests', $guests, ['count' => number_format($guests)]),
+                                                    'days' => trans_choice('{1} :count day|[2,*] :count days', $this->days, ['count' => $this->days]),
+                                                ])
+                                                : __('Catering (₱:rate × :guests)', [
+                                                    'rate' => number_format($this->package->price_per_head),
+                                                    'guests' => trans_choice('{1} :count guest|[2,*] :count guests', $guests, ['count' => number_format($guests)]),
+                                                ]) }}
                                         </dt>
                                         <dd class="font-medium text-brand-900">₱{{ number_format($this->quote['catering_total']) }}</dd>
                                     </div>

@@ -14,7 +14,7 @@ test('a hall booking maps its downpayment column onto paid', function () {
 
     $booking = Booking::factory()->for($hall)->create([
         'guest_name' => 'Juan dela Cruz',
-        'booking_date' => '2027-04-18',
+        'start_date' => '2027-04-18',
         'start_hour' => 8,
         'end_hour' => 12,
         'status' => BookingStatus::Pending,
@@ -65,7 +65,7 @@ test('a catering order maps its downpayment column onto paid', function () {
 
     $order = CateringOrder::factory()->for($package, 'package')->create([
         'guest_name' => 'Ana Reyes',
-        'event_date' => '2027-06-11',
+        'start_date' => '2027-06-11',
         'guests' => 80,
         'status' => BookingStatus::Cancelled,
     ]);
