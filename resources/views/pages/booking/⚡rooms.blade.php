@@ -11,6 +11,7 @@ use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 new
@@ -19,11 +20,21 @@ new
 class extends Component {
     public ?int $room_id = null;
 
+    #[Url(as: 'date')]
     public string $checkin_date = '';
 
+    #[Url(as: 'entry')]
     public ?int $entry_hour = null;
 
     public ?int $rate_id = null;
+
+    /**
+     * The duration the guest asked for on the homepage's availability bar. Rates belong
+     * to a room, so this is held as a plain hour count until a room is picked and the
+     * matching rate can be resolved.
+     */
+    #[Url(as: 'hours')]
+    public ?int $preferred_hours = null;
 
     /**
      * Either 'downpayment' or 'full'. Kept as a string because Flux radio values are
@@ -50,13 +61,33 @@ class extends Component {
     public ?string $reference = null;
 
     /**
-     * Prefill the contact fields for a signed-in guest.
+     * Prefill the contact fields for a signed-in guest, and take whatever the homepage's
+     * availability bar sent over.
      */
     public function mount(): void
     {
         if ($user = Auth::user()) {
             $this->guest_name = $user->name;
             $this->guest_email = $user->email;
+        }
+
+        $this->discardUnusableSearch();
+    }
+
+    /**
+     * Drop query-string values the form could never accept, so a stale link or a
+     * hand-edited URL opens on an empty field instead of one the rules will reject.
+     */
+    protected function discardUnusableSearch(): void
+    {
+        $checkinDate = rescue(fn () => Carbon::parse($this->checkin_date), null, report: false);
+
+        if ($this->checkin_date !== '' && (! $checkinDate || $checkinDate->isBefore(today()))) {
+            $this->checkin_date = '';
+        }
+
+        if ($this->entry_hour !== null && ($this->entry_hour < Room::ENTRY_OPENS_AT || $this->entry_hour > Room::ENTRY_CLOSES_AT)) {
+            $this->entry_hour = null;
         }
     }
 
@@ -187,12 +218,19 @@ class extends Component {
     }
 
     /**
-     * Drop a duration that belongs to a different room.
+     * Drop a duration that belongs to a different room, then re-apply the duration the
+     * guest asked for on the homepage if this room sells one that matches.
      */
     public function selectRoom(int $roomId): void
     {
         $this->room_id = $roomId;
-        $this->rate_id = null;
+
+        // Resolved off `rooms` rather than the `room` computed, which may already have
+        // been cached against the previous selection earlier in this request.
+        $this->rate_id = $this->preferred_hours
+            ? $this->rooms->firstWhere('id', $roomId)?->rates->firstWhere('hours', $this->preferred_hours)?->id
+            : null;
+
         $this->resetValidation('room_id');
     }
 
@@ -250,7 +288,7 @@ class extends Component {
      */
     public function bookAnother(): void
     {
-        $this->reset(['room_id', 'checkin_date', 'entry_hour', 'rate_id', 'payment_option', 'reference', 'showPayment']);
+        $this->reset(['room_id', 'checkin_date', 'entry_hour', 'rate_id', 'preferred_hours', 'payment_option', 'reference', 'showPayment']);
         $this->mount();
     }
 
@@ -302,26 +340,26 @@ class extends Component {
 <div>
     @if ($this->booking)
         {{-- Confirmation --}}
-        <section class="relative isolate overflow-hidden bg-white">
+        <section class="relative isolate overflow-hidden bg-sand-50">
             <x-marketing.glow />
 
             <div class="relative mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
-                <div class="rounded-3xl border border-zinc-200 bg-white p-8 shadow-xl shadow-brand-900/10 sm:p-10">
-                    <div class="flex size-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+                <div class="border-t-2 border-gold-400 bg-white p-8 shadow-xl shadow-brand-950/10 ring-1 ring-sand-200 sm:p-10">
+                    <div class="flex size-14 items-center justify-center bg-brand-800 text-gold-300">
                         <svg class="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.5 4.5L19 7.5" />
                         </svg>
                     </div>
 
-                    <h1 class="mt-6 text-3xl font-bold tracking-tight text-zinc-900">{{ __('Booking received') }}</h1>
+                    <h1 class="mt-8 font-serif text-4xl font-medium text-brand-900">{{ __('Booking received') }}</h1>
 
-                    <p class="mt-3 text-zinc-600">
+                    <p class="mt-3 text-brand-800/70">
                         {{ __('We are verifying your payment. You will get a confirmation once it clears — usually within 24 hours.') }}
                     </p>
 
                     @php $booking = $this->booking; @endphp
 
-                    <div class="mt-6 rounded-2xl border border-brand-200 bg-brand-50/60 p-5">
+                    <div class="mt-6 border-s-2 border-gold-400 bg-sand-100 p-5">
                         <p class="text-sm font-semibold text-brand-800">
                             {{ __('Please arrive by :time on :date', [
                                 'time' => $booking->arriveBy()->format('g:i A'),
@@ -333,7 +371,7 @@ class extends Component {
                         </p>
                     </div>
 
-                    <dl class="mt-8 divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
+                    <dl class="mt-8 divide-y divide-sand-200 border-y border-sand-200 text-sm">
                         @php
                             $rows = [
                                 __('Reference') => $booking->reference,
@@ -349,26 +387,26 @@ class extends Component {
 
                         @foreach ($rows as $label => $value)
                             <div class="flex justify-between gap-6 py-3" wire:key="row-{{ $loop->index }}">
-                                <dt class="text-zinc-500">{{ $label }}</dt>
-                                <dd class="text-right font-medium text-zinc-900">{{ $value }}</dd>
+                                <dt class="text-brand-800/60">{{ $label }}</dt>
+                                <dd class="text-right font-medium text-brand-900">{{ $value }}</dd>
                             </div>
                         @endforeach
 
                         <div class="flex justify-between gap-6 py-3">
-                            <dt class="text-zinc-500">{{ __('Total') }}</dt>
-                            <dd class="text-right font-medium text-zinc-900">₱{{ number_format($booking->total) }}</dd>
+                            <dt class="text-brand-800/60">{{ __('Total') }}</dt>
+                            <dd class="text-right font-medium text-brand-900">₱{{ number_format($booking->total) }}</dd>
                         </div>
 
                         <div class="flex justify-between gap-6 py-3">
-                            <dt class="text-zinc-500">
+                            <dt class="text-brand-800/60">
                                 {{ $booking->pay_in_full ? __('Paid in full') : __('Downpayment sent') }}
                             </dt>
-                            <dd class="text-right font-semibold text-brand-700">₱{{ number_format($booking->amount_paid) }}</dd>
+                            <dd class="text-right font-semibold text-brand-800">₱{{ number_format($booking->amount_paid) }}</dd>
                         </div>
 
                         <div class="flex justify-between gap-6 py-3">
-                            <dt class="text-zinc-500">{{ __('Balance on arrival') }}</dt>
-                            <dd class="text-right font-medium text-zinc-900">₱{{ number_format($booking->balance) }}</dd>
+                            <dt class="text-brand-800/60">{{ __('Balance on arrival') }}</dt>
+                            <dd class="text-right font-medium text-brand-900">₱{{ number_format($booking->balance) }}</dd>
                         </div>
                     </dl>
 
@@ -376,14 +414,14 @@ class extends Component {
                         <button
                             type="button"
                             wire:click="bookAnother"
-                            class="rounded-xl bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700"
+                            class="eyebrow bg-brand-800 px-6 py-4 text-[11px] text-white transition hover:bg-brand-700"
                         >
                             {{ __('Book another room') }}
                         </button>
 
                         <a
                             href="{{ route('home') }}"
-                            class="rounded-xl border border-zinc-300 bg-white px-6 py-3.5 text-sm font-semibold text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50"
+                            class="eyebrow border border-sand-200 bg-white px-6 py-4 text-[11px] text-brand-800 transition hover:border-brand-300 hover:bg-sand-50"
                         >
                             {{ __('Back to home') }}
                         </a>
@@ -393,30 +431,39 @@ class extends Component {
         </section>
     @else
         {{-- Page header --}}
-        <section class="relative isolate overflow-hidden bg-white">
-            <x-marketing.glow />
+        <section class="relative isolate flex h-64 items-end overflow-hidden bg-brand-950 lg:h-80">
+            <img
+                src="{{ asset('images/rooms/room-1.jpg') }}"
+                alt="{{ __('Air-conditioned room with a double bed and wicker frame') }}"
+                width="1856"
+                height="1870"
+                fetchpriority="high"
+                decoding="async"
+                class="absolute inset-0 size-full object-cover opacity-60"
+            />
+            <div aria-hidden="true" class="absolute inset-0 bg-linear-to-t from-brand-950 via-brand-950/50 to-brand-950/20"></div>
 
-            <div class="relative mx-auto max-w-3xl px-4 pb-10 pt-14 text-center sm:px-6 lg:px-8 lg:pt-20">
-                <p class="text-sm font-semibold uppercase tracking-wider text-brand-600">{{ __('Rooms') }}</p>
+            <div class="relative mx-auto w-full max-w-7xl px-4 pb-10 sm:px-6 lg:px-8 lg:pb-14">
+                <p class="eyebrow text-gold-300">{{ __('Rooms') }}</p>
 
-                <h1 class="mt-3 text-4xl font-bold tracking-tight text-balance text-zinc-900 sm:text-5xl">
+                <h1 class="mt-4 font-serif text-4xl/tight font-medium text-balance text-white sm:text-5xl/tight">
                     {{ __('Book a room') }}
                 </h1>
 
-                <p class="mx-auto mt-5 max-w-2xl text-lg/8 text-pretty text-zinc-600">
+                <p class="mt-4 max-w-2xl text-base/7 text-pretty text-sand-100/80">
                     {{ __('Pick a room, choose your check-in time and how long you are staying, then pay half now or the whole thing up front.') }}
                 </p>
             </div>
         </section>
 
-        <section class="bg-zinc-50 pb-20 pt-10 lg:pb-28">
+        <section class="bg-sand-50 pb-24 pt-12 lg:pb-32">
             <div class="mx-auto grid max-w-7xl gap-6 px-4 sm:px-6 lg:grid-cols-[1.15fr_1fr] lg:items-start lg:gap-8 lg:px-8">
                 {{-- Room picker --}}
-                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-                    <h2 class="text-lg font-semibold text-zinc-900">{{ __('Select a room') }}</h2>
+                <div class="min-w-0 bg-white p-6 shadow-sm shadow-brand-950/5 ring-1 ring-sand-200 sm:p-8">
+                    <h2 class="font-serif text-2xl font-medium text-brand-900">{{ __('Select a room') }}</h2>
 
                     @if ($this->rooms->isEmpty())
-                        <p class="mt-6 rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500">
+                        <p class="mt-6 border border-dashed border-sand-200 p-8 text-center text-sm text-brand-800/60">
                             {{ __('No rooms are available to book right now. Please check back later.') }}
                         </p>
                     @else
@@ -429,9 +476,9 @@ class extends Component {
                                     role="radio"
                                     aria-checked="{{ $room_id === $room->id ? 'true' : 'false' }}"
                                     @class([
-                                        'w-full rounded-2xl border p-5 text-left transition',
-                                        'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500' => $room_id === $room->id,
-                                        'border-zinc-200 bg-white hover:border-brand-300 hover:bg-zinc-50' => $room_id !== $room->id,
+                                        'w-full border p-5 text-left transition',
+                                        'border-brand-600 bg-brand-50 ring-1 ring-brand-600' => $room_id === $room->id,
+                                        'border-sand-200 bg-white hover:border-gold-300 hover:bg-sand-50' => $room_id !== $room->id,
                                     ])
                                 >
                                     @if ($room->photos->isNotEmpty())
@@ -441,20 +488,20 @@ class extends Component {
                                         <x-marketing.photo-slideshow
                                             :photos="$room->photos->map(fn ($photo) => ['url' => $photo->url(), 'alt' => $photo->alt, 'width' => 1600, 'height' => 1200])->all()"
                                             :dots="false"
-                                            class="mb-4 aspect-3/2 rounded-xl"
+                                            class="mb-4 aspect-3/2"
                                         />
                                     @endif
 
                                     <div class="flex items-start justify-between gap-4">
                                         <div class="min-w-0">
-                                            <h3 class="text-lg font-semibold text-zinc-900">{{ $room->name }}</h3>
-                                            <p class="mt-1.5 text-sm/6 text-zinc-600">{{ $room->description }}</p>
+                                            <h3 class="font-serif text-2xl font-medium text-brand-900">{{ $room->name }}</h3>
+                                            <p class="mt-1.5 text-sm/6 text-brand-800/70">{{ $room->description }}</p>
                                         </div>
 
                                         <span @class([
                                             'mt-1 flex size-5 shrink-0 items-center justify-center rounded-full border-2',
                                             'border-brand-600 bg-brand-600 text-white' => $room_id === $room->id,
-                                            'border-zinc-300' => $room_id !== $room->id,
+                                            'border-sand-200' => $room_id !== $room->id,
                                         ])>
                                             @if ($room_id === $room->id)
                                                 <svg class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" aria-hidden="true">
@@ -465,9 +512,9 @@ class extends Component {
                                     </div>
 
                                     @if ($room->rates->isNotEmpty())
-                                        <div class="mt-4 flex flex-wrap gap-2 border-t border-zinc-200 pt-4">
+                                        <div class="mt-4 flex flex-wrap gap-2 border-t border-sand-200 pt-4">
                                             @foreach ($room->rates as $rate)
-                                                <span wire:key="rate-badge-{{ $rate->id }}" class="rounded-full bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white">
+                                                <span wire:key="rate-badge-{{ $rate->id }}" class="bg-brand-800 px-3 py-1.5 text-xs font-semibold text-white">
                                                     {{ __(':hours h: ₱:price', ['hours' => $rate->hours, 'price' => number_format($rate->price)]) }}
                                                 </span>
                                             @endforeach
@@ -484,8 +531,8 @@ class extends Component {
                 </div>
 
                 {{-- Booking details --}}
-                <div class="min-w-0 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8 lg:sticky lg:top-24 lg:max-h-[calc(100dvh-7.5rem)] lg:overflow-y-auto">
-                    <h2 class="text-lg font-semibold text-zinc-900">{{ __('Booking details') }}</h2>
+                <div class="min-w-0 border-t-2 border-gold-400 bg-white p-6 shadow-sm shadow-brand-950/5 ring-1 ring-sand-200 sm:p-8 lg:sticky lg:top-28 lg:max-h-[calc(100dvh-8.5rem)] lg:overflow-y-auto">
+                    <h2 class="font-serif text-2xl font-medium text-brand-900">{{ __('Booking details') }}</h2>
 
                     <x-booking.selection
                         class="mt-5"
@@ -531,7 +578,7 @@ class extends Component {
                         </flux:radio.group>
 
                         @if ($this->arriveBy)
-                            <div class="rounded-2xl border border-brand-200 bg-brand-50/60 p-4 text-sm text-brand-800">
+                            <div class="border-s-2 border-gold-400 bg-sand-100 p-4 text-sm text-brand-800">
                                 {{ __('Please arrive by :time — :minutes minutes before your check-in.', [
                                     'time' => $this->arriveBy->format('g:i A'),
                                     'minutes' => \App\Models\Room::ARRIVE_EARLY_MINUTES,
@@ -556,30 +603,30 @@ class extends Component {
 
                         {{-- Live price summary --}}
                         @if ($this->quote)
-                            <div class="rounded-2xl border border-brand-200 bg-brand-50/60 p-5">
-                                <h3 class="text-sm font-semibold text-zinc-900">{{ __('Price summary') }}</h3>
+                            <div class="border-s-2 border-gold-400 bg-sand-100 p-5">
+                                <h3 class="text-sm font-semibold text-brand-900">{{ __('Price summary') }}</h3>
 
                                 <dl class="mt-4 space-y-2.5 text-sm">
                                     <div class="flex justify-between gap-4">
-                                        <dt class="text-zinc-600">{{ __('Room rate (:duration)', ['duration' => $this->rate->label()]) }}</dt>
-                                        <dd class="font-medium text-zinc-900">₱{{ number_format($this->quote['total']) }}</dd>
+                                        <dt class="text-brand-800/70">{{ __('Room rate (:duration)', ['duration' => $this->rate->label()]) }}</dt>
+                                        <dd class="font-medium text-brand-900">₱{{ number_format($this->quote['total']) }}</dd>
                                     </div>
 
-                                    <div class="flex justify-between gap-4 border-t border-brand-200 pt-2.5">
-                                        <dt class="font-semibold text-zinc-900">{{ __('Total') }}</dt>
-                                        <dd class="font-semibold text-zinc-900">₱{{ number_format($this->quote['total']) }}</dd>
+                                    <div class="flex justify-between gap-4 border-t border-sand-200 pt-2.5">
+                                        <dt class="font-semibold text-brand-900">{{ __('Total') }}</dt>
+                                        <dd class="font-semibold text-brand-900">₱{{ number_format($this->quote['total']) }}</dd>
                                     </div>
 
                                     <div class="flex justify-between gap-4">
-                                        <dt class="font-semibold text-brand-700">
+                                        <dt class="font-semibold text-brand-800">
                                             {{ $this->payingInFull() ? __('Paying now (100%)') : __('Paying now (50%)') }}
                                         </dt>
-                                        <dd class="font-bold text-brand-700">₱{{ number_format($this->quote['amount_paid']) }}</dd>
+                                        <dd class="font-bold text-brand-800">₱{{ number_format($this->quote['amount_paid']) }}</dd>
                                     </div>
 
                                     <div class="flex justify-between gap-4">
-                                        <dt class="text-zinc-600">{{ __('Balance on arrival') }}</dt>
-                                        <dd class="font-medium text-zinc-900">₱{{ number_format($this->quote['balance']) }}</dd>
+                                        <dt class="text-brand-800/70">{{ __('Balance on arrival') }}</dt>
+                                        <dd class="font-medium text-brand-900">₱{{ number_format($this->quote['balance']) }}</dd>
                                     </div>
                                 </dl>
                             </div>
@@ -587,7 +634,7 @@ class extends Component {
 
                         <button
                             type="submit"
-                            class="w-full rounded-xl bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            class="eyebrow w-full bg-brand-800 px-6 py-4 text-[11px] text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
                             wire:loading.attr="disabled"
                         >
                             <span wire:loading.remove wire:target="proceedToPayment">{{ __('Proceed to payment') }}</span>
@@ -601,19 +648,19 @@ class extends Component {
         {{-- GCash panel --}}
         @if ($showPayment && $this->quote)
             <div
-                class="fixed inset-0 z-60 flex items-end justify-center bg-zinc-900/60 p-4 backdrop-blur-sm sm:items-center"
+                class="fixed inset-0 z-60 flex items-end justify-center bg-brand-950/70 p-4 backdrop-blur-sm sm:items-center"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="payment-title"
             >
-                <div class="max-h-full w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
+                <div class="max-h-full w-full max-w-md overflow-y-auto border-t-2 border-gold-400 bg-white p-6 shadow-2xl sm:p-8">
                     <div class="flex items-start justify-between gap-4">
-                        <h2 id="payment-title" class="text-xl font-bold text-zinc-900">{{ __('GCash payment') }}</h2>
+                        <h2 id="payment-title" class="font-serif text-2xl font-medium text-brand-900">{{ __('GCash payment') }}</h2>
 
                         <button
                             type="button"
                             wire:click="cancelPayment"
-                            class="-me-2 -mt-1 flex size-9 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                            class="-me-2 -mt-1 flex size-9 items-center justify-center text-brand-800/60 transition-colors hover:bg-sand-100 hover:text-brand-900"
                         >
                             <span class="sr-only">{{ __('Close') }}</span>
                             <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -622,35 +669,35 @@ class extends Component {
                         </button>
                     </div>
 
-                    <p class="mt-4 text-sm text-zinc-600">
+                    <p class="mt-4 text-sm text-brand-800/70">
                         {{ $this->payingInFull() ? __('Send the full amount to hold your room:') : __('Send this amount to hold your room:') }}
                     </p>
 
-                    <p class="mt-1 text-4xl font-bold tracking-tight text-brand-700">₱{{ number_format($this->quote['amount_paid']) }}</p>
+                    <p class="mt-1 font-serif text-5xl font-medium text-brand-800">₱{{ number_format($this->quote['amount_paid']) }}</p>
 
-                    <dl class="mt-6 space-y-2.5 rounded-2xl bg-zinc-50 p-5 text-sm">
+                    <dl class="mt-6 space-y-2.5 bg-sand-100 p-5 text-sm">
                         <div class="flex justify-between gap-4">
-                            <dt class="text-zinc-500">{{ __('Merchant') }}</dt>
-                            <dd class="font-medium text-zinc-900">{{ config('app.name') }}</dd>
+                            <dt class="text-brand-800/60">{{ __('Merchant') }}</dt>
+                            <dd class="font-medium text-brand-900">{{ config('app.name') }}</dd>
                         </div>
                         <div class="flex justify-between gap-4">
-                            <dt class="text-zinc-500">{{ __('GCash number') }}</dt>
-                            <dd class="font-medium text-zinc-900">{{ config('resort.gcash.number') }}</dd>
+                            <dt class="text-brand-800/60">{{ __('GCash number') }}</dt>
+                            <dd class="font-medium text-brand-900">{{ config('resort.gcash.number') }}</dd>
                         </div>
                         <div class="flex justify-between gap-4">
-                            <dt class="text-zinc-500">{{ __('Account name') }}</dt>
-                            <dd class="font-medium text-zinc-900">{{ config('resort.gcash.account_name') }}</dd>
+                            <dt class="text-brand-800/60">{{ __('Account name') }}</dt>
+                            <dd class="font-medium text-brand-900">{{ config('resort.gcash.account_name') }}</dd>
                         </div>
                     </dl>
 
-                    <p class="mt-4 text-sm text-zinc-600">
+                    <p class="mt-4 text-sm text-brand-800/70">
                         {{ __('Send the exact amount, then keep a screenshot of your receipt — we will ask for it if we cannot match your payment.') }}
                     </p>
 
                     <button
                         type="button"
                         wire:click="confirmPayment"
-                        class="mt-6 w-full rounded-xl bg-brand-600 px-6 py-3.5 text-sm font-semibold text-white shadow-sm shadow-brand-600/25 transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        class="mt-6 eyebrow w-full bg-brand-800 px-6 py-4 text-[11px] text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
                         wire:loading.attr="disabled"
                         wire:target="confirmPayment"
                     >
@@ -661,7 +708,7 @@ class extends Component {
                     <button
                         type="button"
                         wire:click="cancelPayment"
-                        class="mt-3 w-full rounded-xl px-6 py-3 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100"
+                        class="eyebrow mt-3 w-full px-6 py-3.5 text-[11px] text-brand-800/70 transition-colors hover:bg-sand-100"
                     >
                         {{ __('Go back') }}
                     </button>

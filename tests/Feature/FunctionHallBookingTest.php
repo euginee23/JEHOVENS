@@ -230,10 +230,10 @@ test('the details panel is pinned so it stays visible while the list scrolls', f
     $html = $this->get(route('booking.function-hall'))->getContent();
 
     // The picker comes first; the details panel is the second card.
-    $panel = str($html)->afterLast('rounded-3xl border border-zinc-200 bg-white p-6')->toString();
+    $panel = str($html)->afterLast('bg-white p-6 shadow-sm shadow-brand-950/5 ring-1 ring-sand-200')->toString();
 
     expect($panel)->toContain('lg:sticky')
-        ->and($panel)->toContain('lg:top-24')
+        ->and($panel)->toContain('lg:top-28')
         // Without a height cap the Proceed button is unreachable on a short screen.
         ->and($panel)->toContain('lg:overflow-y-auto');
 

@@ -7,9 +7,9 @@
 <a
     href="{{ $href }}"
     @class([
-        'inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-semibold transition',
-        'bg-brand-600 text-white shadow-sm shadow-brand-600/25 hover:bg-brand-700' => $variant === 'primary',
-        'border border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50' => $variant === 'secondary',
+        'eyebrow inline-flex items-center gap-2 px-6 py-4 text-[11px] transition',
+        'bg-brand-800 text-white hover:bg-brand-700' => $variant === 'primary',
+        'border border-sand-200 bg-white text-brand-800 hover:border-brand-300 hover:bg-sand-50' => $variant === 'secondary',
     ])
 >
     {{ $slot }}

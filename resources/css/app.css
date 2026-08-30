@@ -11,6 +11,10 @@
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
+    /* Display face for marketing headlines and the wordmark. Body copy, forms, and
+       every button stay on the sans above. */
+    --font-serif: 'Cormorant Garamond', ui-serif, Georgia, 'Times New Roman', serif;
+
     --color-zinc-50: #fafafa;
     --color-zinc-100: #f5f5f5;
     --color-zinc-200: #e5e5e5;
@@ -30,24 +34,30 @@
     --color-accent-content: var(--color-neutral-800);
     --color-accent-foreground: var(--color-white);
 
-    /* Jehoven's brand — pool teal */
-    --color-brand-50: #ecfbfc;
-    --color-brand-100: #d0f4f7;
-    --color-brand-200: #a6e9ef;
-    --color-brand-300: #6fd7e2;
-    --color-brand-400: #33bccd;
-    --color-brand-500: #16a3b7;
-    --color-brand-600: #0d8f9e;
-    --color-brand-700: #0f6f7d;
-    --color-brand-800: #135a66;
-    --color-brand-900: #144b56;
-    --color-brand-950: #06313a;
+    /* Jehoven's brand — deep garden green */
+    --color-brand-50: #f0f6f2;
+    --color-brand-100: #dbe9e0;
+    --color-brand-200: #b8d3c3;
+    --color-brand-300: #8ab59d;
+    --color-brand-400: #5b9175;
+    --color-brand-500: #3b7358;
+    --color-brand-600: #2c5c45;
+    --color-brand-700: #234a38;
+    --color-brand-800: #1c3b2d;
+    --color-brand-900: #163025;
+    --color-brand-950: #0c1c15;
 
-    /* Coral secondary — gradients, glows, and accents only */
-    --color-coral-300: #ffa287;
-    --color-coral-400: #ff7a59;
-    --color-coral-500: #f2593a;
-    --color-coral-600: #d0402a;
+    /* Brass gold — the single accent: eyebrows, rules, and the availability CTA */
+    --color-gold-200: #ecdcb4;
+    --color-gold-300: #ddc389;
+    --color-gold-400: #cda95e;
+    --color-gold-500: #bd9445;
+    --color-gold-600: #9d7833;
+
+    /* Warm ground for the public pages, in place of white/zinc-50 banding */
+    --color-sand-50: #faf8f3;
+    --color-sand-100: #f3efe6;
+    --color-sand-200: #e7e0d2;
 }
 
 @layer theme {
@@ -76,14 +86,14 @@
 
 @layer components {
 
-    /* Brand gradient text — used for the emphasised phrase in marketing headings. */
-    .text-gradient {
-        @apply bg-linear-to-r from-brand-700 via-brand-600 to-brand-400 bg-clip-text text-transparent;
+    /* Small letterspaced label: nav links, section eyebrows, and field captions. */
+    .eyebrow {
+        @apply text-xs font-semibold uppercase tracking-[0.2em];
     }
 
     /* Frosted panel used for floating surfaces over a photo or blurred backdrop. */
     .glass-card {
-        @apply rounded-2xl bg-white/70 shadow-sm ring-1 ring-black/5 backdrop-blur-xl;
+        @apply bg-white/80 shadow-sm ring-1 ring-brand-900/10 backdrop-blur-xl;
     }
 }
 

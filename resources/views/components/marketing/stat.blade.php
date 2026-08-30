@@ -3,7 +3,7 @@
     'label',
 ])
 
-<div class="text-center">
-    <p class="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">{{ $value }}</p>
-    <p class="mt-1.5 text-sm text-zinc-500">{{ $label }}</p>
+<div {{ $attributes->class(['text-center']) }}>
+    <p class="font-serif text-4xl font-medium text-brand-800 sm:text-5xl">{{ $value }}</p>
+    <p class="eyebrow mt-3 text-[10px] text-brand-700/60">{{ $label }}</p>
 </div>

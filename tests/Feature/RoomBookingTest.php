@@ -299,7 +299,7 @@ test('a room without photos still renders its card', function () {
 
 test('the room details panel is pinned', function () {
     $html = $this->get(route('booking.rooms'))->getContent();
-    $panel = str($html)->afterLast('rounded-3xl border border-zinc-200 bg-white p-6')->toString();
+    $panel = str($html)->afterLast('bg-white p-6 shadow-sm shadow-brand-950/5 ring-1 ring-sand-200')->toString();
 
     expect($panel)->toContain('lg:sticky')
         ->and($panel)->toContain('lg:overflow-y-auto')
@@ -317,4 +317,65 @@ test('the room panel prompts, then names the selection and its rate card', funct
         ->assertSee('6 h · ₱1,200')
         ->assertSee('24 h · ₱2,500')
         ->assertDontSee('Pick a room from the list');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Availability search
+|--------------------------------------------------------------------------
+|
+| The homepage's availability bar is a plain GET form that hands `date`, `entry`, and
+| `hours` to this page. Rates belong to a room, so the requested duration is only
+| resolved into a rate once the guest picks one.
+|
+*/
+
+test('the page pre-fills itself from the availability bar', function () {
+    $date = today()->addDay()->toDateString();
+
+    Livewire::withQueryParams(['date' => $date, 'entry' => 14, 'hours' => 24])
+        ->test('pages::booking.rooms')
+        ->assertSet('checkin_date', $date)
+        ->assertSet('entry_hour', 14)
+        ->assertSet('preferred_hours', 24);
+});
+
+test('picking a room applies the duration the guest searched for', function () {
+    $room = Room::factory()->withRates([6 => 1200, 24 => 2500])->create();
+    $overnight = $room->rates()->where('hours', 24)->sole();
+
+    Livewire::withQueryParams(['hours' => 24])
+        ->test('pages::booking.rooms')
+        ->call('selectRoom', $room->id)
+        ->assertSet('rate_id', $overnight->id);
+});
+
+test('a searched duration this room does not sell leaves the picker empty', function () {
+    $room = Room::factory()->withRates([6 => 1200])->create();
+
+    Livewire::withQueryParams(['hours' => 24])
+        ->test('pages::booking.rooms')
+        ->call('selectRoom', $room->id)
+        ->assertSet('rate_id', null);
+});
+
+/**
+ * The query string is guest-editable, so a stale bookmark must not seed the form with a
+ * value `rules()` will only reject after they have filled in everything else.
+ */
+test('an unusable date or entry hour from the query string is discarded', function () {
+    Livewire::withQueryParams(['date' => today()->subDay()->toDateString(), 'entry' => 3])
+        ->test('pages::booking.rooms')
+        ->assertSet('checkin_date', '')
+        ->assertSet('entry_hour', null);
+
+    Livewire::withQueryParams(['date' => 'not-a-date'])
+        ->test('pages::booking.rooms')
+        ->assertSet('checkin_date', '');
+});
+
+test('today is still an acceptable check-in date from the query string', function () {
+    Livewire::withQueryParams(['date' => today()->toDateString()])
+        ->test('pages::booking.rooms')
+        ->assertSet('checkin_date', today()->toDateString());
 });

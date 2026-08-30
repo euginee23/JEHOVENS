@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Room;
 use App\Models\User;
 
 test('the landing page renders the marketing home view', function () {
@@ -112,4 +113,43 @@ test('the public site never links to the admin area, even for a signed-in admin'
     $response->assertOk();
     $response->assertDontSee(route('login'), escape: false);
     $response->assertDontSee(route('admin.dashboard'), escape: false);
+});
+
+/*
+|--------------------------------------------------------------------------
+| The hero's availability bar
+|--------------------------------------------------------------------------
+*/
+
+test('the hero carries an availability search that lands on the room booking page', function () {
+    $room = Room::factory()->withRates([6 => 1200, 24 => 2500])->create();
+
+    $html = $this->get(route('home'))->getContent();
+    $form = str($html)->after('<form method="GET"')->before('</form>')->toString();
+
+    expect($form)->toContain(route('booking.rooms'))
+        ->and($form)->toContain('name="date"')
+        ->and($form)->toContain('name="entry"')
+        ->and($form)->toContain('name="hours"')
+        // A guest must not be able to search a date the booking form would then reject.
+        ->and($form)->toContain('min="'.today()->toDateString().'"')
+        // Durations come from the rates on record, not a hardcoded list.
+        ->and($form)->toContain('value="24"')
+        ->and($form)->toContain('value="6"')
+        ->and($room->rates)->toHaveCount(2);
+});
+
+test('the duration field is dropped rather than rendered empty when no rates exist', function () {
+    $html = $this->get(route('home'))->getContent();
+
+    expect($html)->not->toContain('name="hours"')
+        ->and($html)->toContain('name="date"');
+});
+
+test('the widened nav links only to anchors the page actually renders', function () {
+    $response = $this->get(route('home'));
+
+    foreach (['gallery', 'contact'] as $anchor) {
+        $response->assertSee('id="'.$anchor.'"', escape: false);
+    }
 });

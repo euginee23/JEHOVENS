@@ -41,44 +41,44 @@
                     align-items: center;
                     justify-content: center;
                     font-family: ui-sans-serif, system-ui, sans-serif;
-                    color: #18181b;
-                    background: #fff;
+                    color: #0c1c15;
+                    background: #faf8f3;
                     text-align: center;
                     padding: 2rem;
                 }
-                a { color: #0d8f9e; }
+                a { color: #2c5c45; }
             </style>
         @endif
     </head>
-    <body class="min-h-screen bg-white text-zinc-900 antialiased">
+    <body class="min-h-screen bg-sand-50 text-brand-950 antialiased">
         <div class="relative isolate flex min-h-screen flex-col overflow-hidden">
             {{-- Backdrop --}}
             <div aria-hidden="true" class="pointer-events-none absolute inset-0 overflow-hidden">
-                <div class="absolute -left-32 -top-40 size-[36rem] rounded-full bg-brand-300/30 blur-3xl"></div>
-                <div class="absolute -right-24 -top-24 size-[30rem] rounded-full bg-coral-300/20 blur-3xl"></div>
+                <div class="absolute -left-32 -top-40 size-[36rem] rounded-full bg-brand-200/40 blur-3xl"></div>
+                <div class="absolute -right-24 -top-24 size-[30rem] rounded-full bg-gold-300/20 blur-3xl"></div>
             </div>
 
             <header class="relative px-4 py-6 sm:px-6 lg:px-8">
-                <a href="{{ url('/') }}" class="inline-flex items-center gap-2.5">
-                    <span class="flex size-9 items-center justify-center rounded-xl bg-linear-to-br from-brand-600 to-brand-500 shadow-sm shadow-brand-600/30">
-                        <x-marketing.logo-mark class="size-5 text-white" />
+                <a href="{{ url('/') }}" class="inline-flex items-center gap-3">
+                    <x-marketing.logo-mark class="size-8 text-brand-700" />
+
+                    <span>
+                        <span class="block font-serif text-xl/6 font-semibold tracking-wide text-brand-900">{{ config('app.name', 'Jehoven\'s Garden Resort') }}</span>
+                        <span class="eyebrow mt-0.5 block text-[10px] text-gold-600">{{ __('Garden Resort & Events') }}</span>
                     </span>
-                    <span class="text-lg font-bold tracking-tight text-zinc-900">{{ config('app.name', 'Jehoven\'s Garden Resort') }}</span>
                 </a>
             </header>
 
             <main class="relative flex flex-1 items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
                 <div class="w-full max-w-lg text-center">
-                    <p class="text-7xl font-bold tracking-tight sm:text-8xl">
-                        <span class="text-gradient">{{ $code }}</span>
-                    </p>
+                    <p class="font-serif text-8xl font-medium text-gold-500 sm:text-9xl">{{ $code }}</p>
 
-                    <h1 class="mt-4 text-2xl font-bold tracking-tight text-balance text-zinc-900 sm:text-3xl">
+                    <h1 class="mt-4 font-serif text-3xl font-medium text-balance text-brand-900 sm:text-4xl">
                         {{ $title }}
                     </h1>
 
                     @if ($message)
-                        <p class="mx-auto mt-4 max-w-md text-base/7 text-pretty text-zinc-600">
+                        <p class="mx-auto mt-4 max-w-md text-base/7 text-pretty text-brand-800/70">
                             {{ $message }}
                         </p>
                     @endif
@@ -94,7 +94,7 @@
             </main>
 
             <footer class="relative px-4 py-8 text-center sm:px-6 lg:px-8">
-                <p class="text-sm text-zinc-500">
+                <p class="text-xs text-brand-800/50">
                     &copy; {{ now()->year }} {{ config('app.name', 'Jehoven\'s Garden Resort') }}
                 </p>
             </footer>

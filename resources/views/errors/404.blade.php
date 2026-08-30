@@ -10,8 +10,8 @@
         <x-error-action :href="url('/#book')" variant="secondary">{{ __('See what you can book') }}</x-error-action>
     </x-slot:actions>
 
-    <div class="mt-12 border-t border-zinc-200 pt-8">
-        <p class="text-sm font-semibold text-zinc-900">{{ __('Or go straight to a booking') }}</p>
+    <div class="mt-12 border-t border-sand-200 pt-8">
+        <p class="eyebrow text-gold-600">{{ __('Or go straight to a booking') }}</p>
 
         <ul class="mt-4 flex flex-wrap items-center justify-center gap-2">
             @foreach ([
@@ -22,7 +22,7 @@
                 <li>
                     <a
                         href="{{ $link['href'] }}"
-                        class="rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-sm text-zinc-600 transition-colors hover:border-brand-300 hover:text-brand-700"
+                        class="border border-sand-200 bg-white px-4 py-2 text-sm text-brand-800 transition-colors hover:border-gold-400 hover:text-gold-600"
                     >
                         {{ $link['label'] }}
                     </a>

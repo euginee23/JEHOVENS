@@ -3,6 +3,9 @@
 @props([
     'title' => null,
     'description' => null,
+    // The homepage opens on a full-bleed photo, so the nav floats over it. Everywhere
+    // else the page starts on a solid ground and the nav needs its own.
+    'transparentNav' => false,
 ])
 
 <!DOCTYPE html>
@@ -10,12 +13,12 @@
     <head>
         @include('partials.marketing-head', ['title' => $title, 'description' => $description])
     </head>
-    <body class="min-h-screen bg-white text-zinc-900 antialiased">
-        <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-brand-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">
+    <body class="min-h-screen bg-sand-50 text-brand-950 antialiased">
+        <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:bg-brand-800 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">
             {{ __('Skip to content') }}
         </a>
 
-        <x-marketing.nav />
+        <x-marketing.nav :transparent="$transparentNav" />
 
         <main id="main">
             {{ $slot }}

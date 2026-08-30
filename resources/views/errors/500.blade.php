@@ -8,7 +8,7 @@
         <x-error-action :href="url('/')">{{ __('Back to home') }}</x-error-action>
     </x-slot:actions>
 
-    <p class="mt-10 text-sm text-zinc-500">
+    <p class="mt-10 text-sm text-brand-800/60">
         {{ __('If it keeps happening, please contact the resort so we can sort your booking out by hand.') }}
     </p>
 </x-layouts::error>

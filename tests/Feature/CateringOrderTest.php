@@ -245,7 +245,7 @@ test('a package without photos still renders its card', function () {
 
 test('the catering details panel is pinned', function () {
     $html = $this->get(route('booking.catering'))->getContent();
-    $panel = str($html)->afterLast('rounded-3xl border border-zinc-200 bg-white p-6')->toString();
+    $panel = str($html)->afterLast('bg-white p-6 shadow-sm shadow-brand-950/5 ring-1 ring-sand-200')->toString();
 
     expect($panel)->toContain('lg:sticky')
         ->and($panel)->toContain('lg:overflow-y-auto')

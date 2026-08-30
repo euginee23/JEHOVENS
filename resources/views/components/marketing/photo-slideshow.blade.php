@@ -7,7 +7,12 @@
     'interval' => 5000,
     'dots' => false,
     'dotsAlign' => 'center',
+    // `true` darkens the lower edge so dots and captions stay readable; `'full'` washes
+    // the whole panel from the left, for a hero that carries copy over the photograph.
     'scrim' => false,
+    // Fills the nearest positioned ancestor instead of sizing itself, so the panel can
+    // back a full-bleed section whose height is set by its own content.
+    'cover' => false,
     'eager' => false,
     'imgClass' => '',
 ])
@@ -22,7 +27,9 @@
         x-data="{ current: 0, total: {{ count($photos) }} }"
         x-init="setInterval(() => current = (current + 1) % total, {{ $interval }})"
     @endif
-    {{ $attributes->class(['relative overflow-hidden bg-zinc-100']) }}
+    {{-- `cover` deliberately carries no negative z-index: the dots live inside this panel
+         and must stay clickable, so the section's own copy layers above it instead. --}}
+    {{ $attributes->class(['overflow-hidden bg-sand-100', 'relative' => ! $cover, 'absolute inset-0 size-full' => $cover]) }}
 >
     @foreach ($photos as $index => $photo)
         <img
@@ -32,6 +39,10 @@
             alt="{{ $photo['alt'] }}"
             width="{{ $photo['width'] }}"
             height="{{ $photo['height'] }}"
+            {{-- An optional focal point, as an inline style rather than a class: the value
+                 comes from data, and Tailwind only generates the arbitrary `object-[…]`
+                 utilities it can find by scanning the source. --}}
+            @isset($photo['position']) style="object-position: {{ $photo['position'] }}" @endisset
             @if ($eager && $loop->first) fetchpriority="high" @else loading="lazy" @endif
             decoding="async"
             @if ($isSlideshow)
@@ -48,7 +59,10 @@
         />
     @endforeach
 
-    @if ($scrim)
+    @if ($scrim === 'full')
+        <div aria-hidden="true" class="absolute inset-0 bg-linear-to-r from-brand-950/85 via-brand-950/55 to-brand-950/20"></div>
+        <div aria-hidden="true" class="absolute inset-x-0 bottom-0 h-64 bg-linear-to-t from-brand-950/80 to-transparent"></div>
+    @elseif ($scrim)
         <div aria-hidden="true" class="absolute inset-x-0 bottom-0 h-32 bg-linear-to-t from-black/40 to-transparent"></div>
     @endif
 

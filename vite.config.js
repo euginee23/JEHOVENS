@@ -17,6 +17,12 @@ export default defineConfig({
                 bunny('Instrument Sans', {
                     weights: [400, 500, 600],
                 }),
+                // Display face for the marketing headlines; the italic carries the
+                // accent line under the hero headline.
+                bunny('Cormorant Garamond', {
+                    weights: [400, 500, 600, 700],
+                    styles: ['normal', 'italic'],
+                }),
             ],
         }),
         tailwindcss(),
