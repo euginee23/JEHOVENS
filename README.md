@@ -298,8 +298,9 @@ three behind its tabs.
 
 ## Payments
 
-Bookings are paid for through **PayMongo Checkout** — GCash and Maya, including paying by
-QR, which happens inside those flows on PayMongo's own page. The
+Bookings are paid for through **PayMongo Checkout**, by **QR Ph**: the guest scans the
+code with any bank or e-wallet app and it settles over InstaPay. That needs no merchant
+wallet, which is why it works while the resort's e-wallet methods are still inactive. The
 guest fills in the booking form, the booking is written, and they are sent to PayMongo to
 pay. PayMongo reports the payment back to a webhook, which confirms the booking, records
 the payment reference and emails the guest.
@@ -314,8 +315,9 @@ PAYMONGO_HOLD_MINUTES=60
 **Without a secret key the booking pages refuse to take a booking** and say so, rather than
 recording one nobody paid for.
 
-**Registering the webhook.** The signing secret is not in the dashboard — it comes back
-once, in the response to creating the webhook, so save it there and then:
+**Registering the webhook.** Easiest on the dashboard: Settings → Webhooks → Create, with
+the endpoint URL above. The signing secret is shown once, when the webhook is created —
+save it then, it cannot be read back. The same thing over the API:
 
 ```bash
 curl https://api.paymongo.com/v1/webhooks \
@@ -335,10 +337,31 @@ The first is what confirms a booking; without it, guests pay and the sweeper can
 an hour later. The app ignores every other event, so subscribing to more only fills the
 `payment_webhook_events` table with noise.
 
-**Payment methods** are set in `config/services.php` under `paymongo.methods`, not here.
-That list must contain only methods your PayMongo account is enabled for — naming one it
-is not makes PayMongo reject the checkout session, which breaks every booking rather than
-just that method.
+**Payment methods** come from `PAYMONGO_METHODS`, not from the webhook screen:
+
+```dotenv
+PAYMONGO_METHODS=qrph
+```
+
+QR Ph is the only method active on the resort's account — the e-wallets stay inactive
+until PayMongo verifies the business. **When they go live, empty this setting** and
+PayMongo will offer everything the account has, with no further change needed.
+
+If a guest reaches the checkout page and it says **"No payment methods are available"**,
+the account has none of the methods named there. Clear `PAYMONGO_METHODS` to fall back to
+whatever the account really offers — and check whether the account is activated at all,
+since a live account awaiting PayMongo's approval has nothing enabled yet.
+
+To find out what an account offers without making a booking:
+
+```bash
+php artisan resort:paymongo-check                  # whatever the account has
+php artisan resort:paymongo-check --methods=qrph   # can it offer this one?
+```
+
+It opens a throwaway checkout session — nothing is charged — and prints the URL to look
+at. A method the account cannot offer through Checkout is rejected outright, and the
+command prints PayMongo's own reason.
 
 ### Testing a real payment
 

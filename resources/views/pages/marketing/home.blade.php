@@ -389,9 +389,9 @@
 
             <dl class="mx-auto mt-20 grid max-w-4xl gap-10 border-t border-white/10 pt-14 text-center sm:grid-cols-3">
                 <div>
-                    <dt class="eyebrow text-gold-300">{{ __('Pay online') }}</dt>
-                    <dd class="mt-3 font-serif text-2xl text-white">{{ __('GCash or Maya') }}</dd>
-                    <dd class="mt-1 text-sm text-sand-200/70">{{ __('Secured by PayMongo') }}</dd>
+                    <dt class="eyebrow text-gold-300">{{ __('Scan to pay') }}</dt>
+                    <dd class="mt-3 font-serif text-2xl text-white">{{ __('QR Ph') }}</dd>
+                    <dd class="mt-1 text-sm text-sand-200/70">{{ __('Any bank or e-wallet app, via PayMongo') }}</dd>
                 </div>
 
                 <div>

@@ -542,9 +542,13 @@ class extends BooksDatesComponent {
                             class="eyebrow w-full bg-brand-800 px-6 py-4 text-[11px] text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
                             wire:loading.attr="disabled"
                         >
-                            <span wire:loading.remove wire:target="proceedToPayment">{{ __('Proceed to payment') }}</span>
-                            <span wire:loading wire:target="proceedToPayment">{{ __('Checking your order…') }}</span>
+                            <span wire:loading.remove wire:target="proceedToPayment">{{ __('Pay :amount and book', ['amount' => $this->quote ? '₱'.number_format($this->quote['downpayment']) : '']) }}</span>
+                            <span wire:loading wire:target="proceedToPayment">{{ __('Taking you to the payment page…') }}</span>
                         </button>
+
+                        <p class="text-center text-xs text-brand-800/60">
+                            {{ __('You will be taken to PayMongo to pay by QR Ph — scan the code with any bank or e-wallet app. Your dates are held while you pay.') }}
+                        </p>
                     </form>
                 </div>
             </div>

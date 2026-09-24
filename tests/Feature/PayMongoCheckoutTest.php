@@ -117,16 +117,28 @@ test('the guest details are sent so PayMongo can receipt them', function () {
 });
 
 /**
- * Naming a method the resort's PayMongo account is not enabled for makes PayMongo reject
- * the whole checkout session, so this breaks every booking rather than just that method.
- * The list is pinned here so adding one is a deliberate act with the account checked.
+ * QR Ph is the resort's only active method — it settles over InstaPay, so it needs no
+ * merchant wallet, and the e-wallet methods sit inactive on the account. Naming a method
+ * the account does not have narrows the checkout page to nothing, and the guest only finds
+ * out after committing to a booking, so what is asked for is pinned here.
  */
-test('only the payment methods the account is enabled for are offered', function () {
+test('QR Ph is what the guest is offered', function () {
     fakePayMongo();
 
     ($this->submit)();
 
-    Http::assertSent(fn (Request $request) => data_get($request->data(), 'data.attributes.payment_method_types') === ['gcash', 'paymaya']);
+    Http::assertSent(fn (Request $request) => data_get($request->data(), 'data.attributes.payment_method_types') === ['qrph']);
+});
+
+// The day the wallets go live, emptying the setting hands the choice back to PayMongo.
+test('naming no methods lets PayMongo offer whatever the account has', function () {
+    config(['services.paymongo.methods' => []]);
+
+    fakePayMongo();
+
+    ($this->submit)();
+
+    Http::assertSent(fn (Request $request) => ! array_key_exists('payment_method_types', data_get($request->data(), 'data.attributes')));
 });
 
 /*

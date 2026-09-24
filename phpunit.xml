@@ -38,5 +38,8 @@
         <env name="PAYMONGO_PUBLIC_KEY" value="pk_test_fake"/>
         <env name="PAYMONGO_WEBHOOK_SECRET" value="whsk_test_fake"/>
         <env name="PAYMONGO_BASE_URL" value="https://api.paymongo.com/v1"/>
+        <!-- Pinned so the suite does not depend on whatever a developer has set locally.
+             Tests that care about a different list override it with config(). -->
+        <env name="PAYMONGO_METHODS" value="qrph"/>
     </php>
 </phpunit>

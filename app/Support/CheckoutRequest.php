@@ -53,7 +53,11 @@ readonly class CheckoutRequest
                         'name' => $this->lineItemName,
                         'quantity' => 1,
                     ]],
-                    'payment_method_types' => array_values($this->methods),
+                    // Left out entirely when empty, which tells PayMongo to offer
+                    // whatever the account has enabled. Naming methods narrows that list,
+                    // and naming one the account lacks narrows it to nothing — which the
+                    // guest sees as "No payment methods are available".
+                    'payment_method_types' => $this->methods === [] ? null : array_values($this->methods),
                     'description' => $this->description,
 
                     // Shown on the guest's PayMongo receipt and handed back on the

@@ -721,7 +721,7 @@ class extends BooksDatesComponent {
                         </button>
 
                         <p class="text-center text-xs text-brand-800/60">
-                            {{ __('You will be taken to PayMongo to pay by GCash or Maya. Your dates are held while you pay.') }}
+                            {{ __('You will be taken to PayMongo to pay by QR Ph — scan the code with any bank or e-wallet app. Your dates are held while you pay.') }}
                         </p>
                     </form>
                 </div>
