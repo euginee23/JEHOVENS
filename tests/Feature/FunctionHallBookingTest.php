@@ -419,6 +419,29 @@ test('a non-overlapping slot on the same day is allowed', function () {
     expect(Booking::count())->toBe(2);
 });
 
+/**
+ * Flux's `placeholder` renders `<option disabled selected>`, and a disabled option is not
+ * a valid selection. After any Livewire re-render the browser fell back to showing the
+ * first real option, so the field read as filled in while the value was still empty — and
+ * the guest was told to choose something they could see already chosen.
+ */
+test('the pickers offer a real empty option rather than a disabled placeholder', function () {
+    $html = Livewire::test('pages::booking.function-hall')
+        ->call('toggleDate', now()->addWeek()->toDateString())
+        ->html();
+
+    expect($html)->toContain('Please select a start time')
+        ->and($html)->not->toContain('disabled selected');
+});
+
+test('an error clears once the guest fills the field in', function () {
+    $component = fillBooking($this->hall, ['guest_phone' => '12345']);
+
+    $component->call('proceedToPayment')->assertHasErrors('guest_phone');
+
+    $component->set('guest_phone', '09171234567')->assertHasNoErrors('guest_phone');
+});
+
 test('changing the start time clears an end time that no longer fits', function () {
     Livewire::test('pages::booking.function-hall')
         ->set('start_hour', 8)

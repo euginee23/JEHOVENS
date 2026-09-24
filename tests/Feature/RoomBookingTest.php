@@ -294,6 +294,35 @@ test('a rate belonging to another room is rejected', function () {
     expect(RoomBooking::count())->toBe(0);
 });
 
+/**
+ * Livewire keeps validation errors until something clears them, so a guest who submitted
+ * an incomplete form and then picked the missing value went on being told to pick it,
+ * with their choice plainly selected right above the message.
+ */
+/**
+ * Flux's `placeholder` renders `<option disabled selected>`, and a disabled option is not
+ * a valid selection. After any Livewire re-render the browser fell back to showing the
+ * first real option, so the field read as filled in while the value was still empty — and
+ * the guest was told to choose something they could see already chosen.
+ */
+test('the pickers offer a real empty option rather than a disabled placeholder', function () {
+    $html = Livewire::test('pages::booking.rooms')
+        ->call('toggleDate', now()->addWeek()->toDateString())
+        ->html();
+
+    expect($html)->toContain('Please select a time')
+        ->and($html)->not->toContain('disabled selected');
+});
+
+test('an error clears once the guest fills the field in', function () {
+    $component = fillRoomBooking($this->room, ['entry_hour' => null, 'rate_id' => null]);
+
+    $component->call('proceedToPayment')->assertHasErrors(['entry_hour', 'rate_id']);
+
+    $component->set('entry_hour', 9)->assertHasNoErrors('entry_hour');
+    $component->set('rate_id', $this->room->rates->firstWhere('hours', 6)->id)->assertHasNoErrors('rate_id');
+});
+
 test('switching rooms clears the chosen duration', function () {
     $otherRoom = Room::factory()->withRates()->create();
 

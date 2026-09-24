@@ -765,9 +765,16 @@ class extends BooksDatesComponent {
                             @enderror
                         </div>
 
-                        <flux:select wire:model.live="entry_hour" :label="__('Time of entry')" :placeholder="__('Select entry time')">
+                        {{-- A real empty option rather than Flux's `placeholder`, which
+                             renders as `<option disabled selected>`. A disabled option is
+                             not a valid selection, so once Livewire re-rendered the field
+                             the browser fell back to showing the first real time — making
+                             the form look filled in while the value was still empty. --}}
+                        <flux:select wire:model.live="entry_hour" :label="__('Time of entry')">
+                            <flux:select.option value="">{{ __('Please select a time') }}</flux:select.option>
+
                             @foreach ($this->entryHours as $hour => $label)
-                                <flux:select.option wire:key="entry-{{ $hour }}" :value="$hour">{{ $label }}</flux:select.option>
+                                <flux:select.option :value="$hour">{{ $label }}</flux:select.option>
                             @endforeach
                         </flux:select>
 
@@ -779,12 +786,15 @@ class extends BooksDatesComponent {
                             <flux:select
                                 wire:model.live="rate_id"
                                 :label="$this->days > 1 ? __('How long each day') : __('How long for')"
-                                :placeholder="$this->room ? __('Select hours') : __('Pick a room first')"
                                 :disabled="! $this->room"
                             >
+                                <flux:select.option value="">
+                                    {{ $this->room ? __('Please select a duration') : __('Pick a room first') }}
+                                </flux:select.option>
+
                                 @if ($this->room)
                                     @foreach ($this->room->rates as $rate)
-                                        <flux:select.option wire:key="rate-{{ $rate->id }}" :value="$rate->id">
+                                        <flux:select.option :value="$rate->id">
                                             {{ $rate->label() }} — ₱{{ number_format($rate->price) }}
                                         </flux:select.option>
                                     @endforeach

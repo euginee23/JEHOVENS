@@ -589,20 +589,30 @@ class extends BooksDatesComponent {
 
                         <div>
                             <div class="grid gap-4 sm:grid-cols-2">
-                                <flux:select wire:model.live="start_hour" :label="__('Start time')" :placeholder="__('Select start time')">
+                                {{-- A real empty option rather than Flux's `placeholder`,
+                                     which renders as `<option disabled selected>`. A
+                                     disabled option is not a valid selection, so after a
+                                     Livewire re-render the browser fell back to the first
+                                     real time and the field looked filled in when it was not. --}}
+                                <flux:select wire:model.live="start_hour" :label="__('Start time')">
+                                    <flux:select.option value="">{{ __('Please select a start time') }}</flux:select.option>
+
                                     @foreach ($this->startHours as $hour => $label)
-                                        <flux:select.option wire:key="start-{{ $hour }}" :value="$hour">{{ $label }}</flux:select.option>
+                                        <flux:select.option :value="$hour">{{ $label }}</flux:select.option>
                                     @endforeach
                                 </flux:select>
 
                                 <flux:select
                                     wire:model.live="end_hour"
                                     :label="__('End time')"
-                                    :placeholder="$start_hour === null ? __('Pick a start time first') : __('Select end time')"
                                     :disabled="$start_hour === null"
                                 >
+                                    <flux:select.option value="">
+                                        {{ $start_hour === null ? __('Pick a start time first') : __('Please select an end time') }}
+                                    </flux:select.option>
+
                                     @foreach ($this->endHours as $hour => $label)
-                                        <flux:select.option wire:key="end-{{ $hour }}" :value="$hour">{{ $label }}</flux:select.option>
+                                        <flux:select.option :value="$hour">{{ $label }}</flux:select.option>
                                     @endforeach
                                 </flux:select>
                             </div>

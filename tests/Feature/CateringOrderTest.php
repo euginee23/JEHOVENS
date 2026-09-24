@@ -232,6 +232,14 @@ test('an order with no dates at all is refused', function () {
     expect(CateringOrder::count())->toBe(0);
 });
 
+test('an error clears once the guest fills the field in', function () {
+    $component = fillCateringOrder($this->package, ['guests' => null]);
+
+    $component->call('proceedToPayment')->assertHasErrors('guests');
+
+    $component->set('guests', 50)->assertHasNoErrors('guests');
+});
+
 test('a head count is required', function () {
     fillCateringOrder($this->package, ['guests' => null])
         ->call('proceedToPayment')

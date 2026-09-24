@@ -108,6 +108,21 @@ abstract class BooksDatesComponent extends Component
     }
 
     /**
+     * Clear a field's error the moment the guest fixes it.
+     *
+     * Livewire keeps validation errors until something clears them, so without this a
+     * guest who submitted an incomplete form and then filled the missing field in went on
+     * reading "Choose how long you are staying" with a duration plainly selected above it.
+     *
+     * The whole form is still re-validated on submit; this only takes down a message that
+     * has stopped being true.
+     */
+    public function updated(string $property): void
+    {
+        $this->resetValidation($property);
+    }
+
+    /**
      * Take whatever the session knows: the contact details of a signed-in guest, and the
      * outcome of a checkout they have just come back from.
      */
