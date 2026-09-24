@@ -632,7 +632,7 @@ class extends Component {
     </div>
 
     {{-- Detail --}}
-    <flux:modal name="booking-detail" class="w-full md:max-w-lg">
+    <flux:modal name="booking-detail" class="w-full md:max-w-3xl">
         @if ($this->booking)
             @php
                 $b = $this->booking;
@@ -689,59 +689,77 @@ class extends Component {
             @endphp
 
             <div class="space-y-6">
-                <div class="flex items-start justify-between gap-4">
-                    <div>
-                        <flux:heading size="lg">{{ $b->reference }}</flux:heading>
-                        <flux:text class="mt-1">
+                {{-- The status badge sits under the heading rather than opposite it: the
+                     modal's own close button occupies the top-right corner, and the two
+                     were overlapping. `pe-8` keeps the reference clear of it too. --}}
+                <div class="pe-8">
+                    <flux:heading size="lg">{{ $b->reference }}</flux:heading>
+
+                    <div class="mt-1.5 flex flex-wrap items-center gap-2">
+                        <flux:text>
                             {{ match (true) {
                                 $isRoom => $b->room->name,
                                 $isCatering => $b->package->name,
                                 default => $b->hall->name,
                             } }}
                         </flux:text>
-                    </div>
 
-                    <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold {{ $b->status->classes() }}">
-                        {{ $b->status->shortLabel() }}
-                    </span>
+                        <span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $b->status->classes() }}">
+                            {{ $b->status->shortLabel() }}
+                        </span>
+                    </div>
                 </div>
 
                 {{-- The guest comes first and gets its own block: phone and email are what
                      staff actually reach for, and they are dialable and clickable here
                      rather than something to copy out by hand. --}}
                 <div class="rounded-lg bg-zinc-50 p-4">
-                    <p class="text-base font-semibold text-zinc-900">{{ $b->guest_name }}</p>
+                    {{-- Spread across the row on a wide screen rather than stacked in a
+                         narrow column, which left most of the modal empty. --}}
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                        <div class="min-w-0">
+                            <p class="text-base font-semibold text-zinc-900">{{ $b->guest_name }}</p>
+                            <p class="mt-0.5 text-xs text-zinc-500">
+                                {{ $b->user_id
+                                    ? __('Booked from a signed-in account.')
+                                    : __('Booked as a guest, without an account.') }}
+                            </p>
+                        </div>
 
-                    <div class="mt-2 space-y-1 text-sm">
-                        <a href="tel:{{ $b->guest_phone }}" class="block text-brand-600 hover:text-brand-700">
-                            {{ $b->guest_phone }}
-                        </a>
-                        <a href="mailto:{{ $b->guest_email }}" class="block break-all text-brand-600 hover:text-brand-700">
-                            {{ $b->guest_email }}
-                        </a>
+                        {{-- Dialable and clickable, so nobody has to copy a number out by
+                             hand while a guest is on the phone. --}}
+                        <div class="flex shrink-0 flex-col gap-1 text-sm sm:items-end">
+                            <a href="tel:{{ $b->guest_phone }}" class="text-brand-600 hover:text-brand-700">
+                                {{ $b->guest_phone }}
+                            </a>
+                            <a href="mailto:{{ $b->guest_email }}" class="break-all text-brand-600 hover:text-brand-700">
+                                {{ $b->guest_email }}
+                            </a>
+                        </div>
                     </div>
-
-                    <p class="mt-2 text-xs text-zinc-500">
-                        {{ $b->user_id
-                            ? __('Booked from a signed-in account.')
-                            : __('Booked as a guest, without an account.') }}
-                    </p>
                 </div>
 
-                @foreach ($sections as $heading => $rows)
-                    <div wire:key="section-{{ $loop->index }}">
-                        <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">{{ $heading }}</p>
+                {{-- Side by side on a wide screen, stacked on a narrow one. Neither
+                     section is long, and reading them in one glance beats scrolling. --}}
+                <div class="grid gap-6 md:grid-cols-2">
+                    @foreach ($sections as $heading => $rows)
+                        <div wire:key="section-{{ $loop->index }}">
+                            <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">{{ $heading }}</p>
 
-                        <dl class="mt-2 divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
-                            @foreach ($rows as $label => $value)
-                                <div class="flex justify-between gap-6 py-2.5" wire:key="detail-{{ $loop->parent->index }}-{{ $loop->index }}">
-                                    <dt class="shrink-0 text-zinc-500">{{ $label }}</dt>
-                                    <dd class="text-right font-medium text-zinc-900">{{ $value }}</dd>
-                                </div>
-                            @endforeach
-                        </dl>
-                    </div>
-                @endforeach
+                            <dl class="mt-2 divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
+                                @foreach ($rows as $label => $value)
+                                    <div class="flex items-baseline justify-between gap-4 py-2.5" wire:key="detail-{{ $loop->parent->index }}-{{ $loop->index }}">
+                                        <dt class="shrink-0 text-zinc-500">{{ $label }}</dt>
+                                        {{-- `break-all`: a payment reference is a long
+                                             unbroken string and would otherwise widen the
+                                             column past its share of the grid. --}}
+                                        <dd class="break-all text-right font-medium text-zinc-900">{{ $value }}</dd>
+                                    </div>
+                                @endforeach
+                            </dl>
+                        </div>
+                    @endforeach
+                </div>
 
                 @if ($b->admin_note)
                     <div>
@@ -750,11 +768,13 @@ class extends Component {
                     </div>
                 @endif
 
-                {{-- The status is spelled out in full here — "Awaiting payment
-                     confirmation" rather than the table's one-word chip — because this is
-                     where someone reads it before deciding what to do about it. --}}
                 <div class="space-y-3 border-t border-zinc-200 pt-4">
-                    <p class="text-sm text-zinc-600">{{ $b->status->label() }}</p>
+                    {{-- Only when it says more than the badge above already does. For a
+                         pending booking that is "Awaiting payment confirmation", which is
+                         worth reading; for a confirmed one it would just repeat itself. --}}
+                    @if ($b->status->label() !== $b->status->shortLabel())
+                        <p class="text-sm text-zinc-600">{{ $b->status->label() }}</p>
+                    @endif
 
                     <div class="flex flex-wrap items-center gap-2">
                         @foreach ($b->status->transitions() as $target)
