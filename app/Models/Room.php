@@ -136,17 +136,18 @@ class Room extends Model implements Photographable
     /**
      * Split a stay into what is due now and what is left to pay on arrival.
      *
-     * `$nights` is zero for a day-use booking, which is charged the given rate once. For
-     * an overnight stay it is the number of nights, and `$rate` should be the room's
-     * `overnightRate()` — charged once per night.
+     * `$nights` is zero for a day-use booking and `$days` is how many days it runs on —
+     * the same block is sold again on each of them, so two Saturdays by the pool is the
+     * rate twice over. For an overnight stay `$nights` is the number of nights and
+     * `$rate` should be the room's `overnightRate()`, charged once per night.
      *
      * The amount due is rounded up so the resort is never short a peso on an odd total.
      *
      * @return array{total: int, amount_paid: int, balance: int}
      */
-    public function quote(RoomRate $rate, bool $payInFull, int $nights = 0): array
+    public function quote(RoomRate $rate, bool $payInFull, int $nights = 0, int $days = 1): array
     {
-        $total = $rate->price * max($nights, 1);
+        $total = $rate->price * max($nights, $days, 1);
         $amountPaid = $payInFull ? $total : (int) ceil($total * self::DOWNPAYMENT_RATE);
 
         return [

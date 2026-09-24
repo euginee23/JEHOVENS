@@ -30,6 +30,29 @@ final class DateRange
     }
 
     /**
+     * Every ISO date from one moment to another, inclusive of both ends.
+     *
+     * The cursor is reassigned rather than advanced in place: this application sets
+     * `Date::use(CarbonImmutable::class)`, so the dates handed in by an Eloquent cast are
+     * immutable and `$cursor->addDay()` on its own would never move.
+     *
+     * @return array<int, string>
+     */
+    public static function daysBetween(CarbonInterface $from, CarbonInterface $until): array
+    {
+        $dates = [];
+        $cursor = $from->copy()->startOfDay();
+        $last = $until->copy()->startOfDay();
+
+        while ($cursor->lte($last)) {
+            $dates[] = $cursor->toDateString();
+            $cursor = $cursor->addDay();
+        }
+
+        return $dates;
+    }
+
+    /**
      * Build the range, dropping whatever the two ends already share.
      */
     private static function format(CarbonInterface $from, CarbonInterface $until, string $partial, string $full): string

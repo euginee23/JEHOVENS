@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\CateringOrder;
 use App\Models\CateringPackage;
@@ -143,20 +144,113 @@ test('a day-use room booking leaves the rest of the day open', function () {
         ->and($availability->isPartial($this->date))->toBeTrue();
 });
 
-test('a range crossing a fully booked day is not clear', function () {
+test('a selection containing a fully booked day is rejected', function () {
+    $taken = Carbon::parse($this->date)->addDay()->toDateString();
+
     Booking::factory()->for($this->hall)->create([
-        'start_date' => Carbon::parse($this->date)->addDay()->toDateString(),
+        'start_date' => $taken,
         'start_hour' => Hall::OPENS_AT,
         'end_hour' => Hall::CLOSES_AT,
     ]);
 
     $availability = Availability::forHall($this->hall->id, ...window($this->date));
 
-    expect($availability->rangeIsClear($this->date, Carbon::parse($this->date)->addDays(2)->toDateString()))
-        ->toBeFalse()
-        // A range stopping short of the taken day is still fine.
-        ->and($availability->rangeIsClear($this->date, $this->date))
-        ->toBeTrue();
+    expect($availability->anyUnavailable([$this->date, $taken]))->toBeTrue()
+        // A selection that steps over the taken day is fine.
+        ->and($availability->anyUnavailable([$this->date, Carbon::parse($this->date)->addDays(2)->toDateString()]))
+        ->toBeFalse();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Days chosen one at a time
+|--------------------------------------------------------------------------
+|
+| A booking's days need not be consecutive, so availability has to read the days a booking
+| actually covers rather than the span between its first and last.
+|
+*/
+
+test('a hall booking on separate days leaves the days between them open', function () {
+    $booking = Booking::factory()->for($this->hall)->create([
+        'start_hour' => Hall::OPENS_AT,
+        'end_hour' => Hall::CLOSES_AT,
+    ]);
+
+    $first = $this->date;
+    $last = Carbon::parse($this->date)->addDays(4)->toDateString();
+
+    $booking->syncDates([$first, $last]);
+
+    $availability = Availability::forHall($this->hall->id, ...window($this->date));
+
+    expect($availability->isUnavailable($first))->toBeTrue()
+        ->and($availability->isUnavailable($last))->toBeTrue();
+
+    // The three days in between were never sold and must stay on offer.
+    foreach ([1, 2, 3] as $offset) {
+        $between = Carbon::parse($this->date)->addDays($offset)->toDateString();
+
+        expect($availability->isUnavailable($between))->toBeFalse()
+            ->and($availability->isPartial($between))->toBeFalse();
+    }
+});
+
+test('day use on separate days leaves the days between them open', function () {
+    $booking = RoomBooking::factory()->for($this->room)->create([
+        'starts_at' => Carbon::parse($this->date)->setTime(8, 0),
+        'ends_at' => Carbon::parse($this->date)->setTime(14, 0),
+        'hours' => 6,
+    ]);
+
+    $last = Carbon::parse($this->date)->addDays(4)->toDateString();
+
+    $booking->syncDates([$this->date, $last]);
+
+    $availability = Availability::forRoom($this->room->id, ...window($this->date));
+
+    expect($availability->isPartial($this->date))->toBeTrue()
+        ->and($availability->isPartial($last))->toBeTrue()
+        ->and($availability->busyHours($last))->not->toBeEmpty();
+
+    $between = Carbon::parse($this->date)->addDays(2)->toDateString();
+
+    expect($availability->isPartial($between))->toBeFalse()
+        ->and($availability->isUnavailable($between))->toBeFalse();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Finished bookings
+|--------------------------------------------------------------------------
+*/
+
+// The resort's own example: a booking marked completed puts its day back on sale, so the
+// same day can be sold again to someone else.
+test('a completed booking no longer blocks its day', function () {
+    Booking::factory()->for($this->hall)->create([
+        'start_date' => $this->date,
+        'start_hour' => Hall::OPENS_AT,
+        'end_hour' => Hall::CLOSES_AT,
+        'status' => BookingStatus::Completed,
+    ]);
+
+    $availability = Availability::forHall($this->hall->id, ...window($this->date));
+
+    expect($availability->isUnavailable($this->date))->toBeFalse()
+        ->and($availability->isPartial($this->date))->toBeFalse();
+});
+
+test('a completed stay no longer blocks its room', function () {
+    RoomBooking::factory()->for($this->room)->overnight(2)->create([
+        'starts_at' => Carbon::parse($this->date)->setTime(14, 0),
+        'status' => BookingStatus::Completed,
+    ]);
+
+    $availability = Availability::forRoom($this->room->id, ...window($this->date));
+
+    expect($availability->isUnavailable($this->date))->toBeFalse()
+        ->and($availability->isPartial($this->date))->toBeFalse();
 });
 
 test('catering never closes a date, since it has no capacity rule', function () {

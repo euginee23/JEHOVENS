@@ -46,7 +46,6 @@
                 type="date"
                 name="date"
                 min="{{ today()->toDateString() }}"
-                value="{{ today()->toDateString() }}"
                 class="{{ $controlClass }} mt-1"
             />
         </span>
@@ -60,8 +59,11 @@
         <span class="min-w-0 flex-1">
             <label for="availability-entry" class="{{ $labelClass }} block">{{ __('Arrival') }}</label>
             <select id="availability-entry" name="entry" class="{{ $controlClass }} mt-1">
+                {{-- Nothing is pre-picked: the guest chooses their own time rather than
+                     carrying a default through to the booking form. --}}
+                <option value="" class="text-brand-900" selected>{{ __('Select time') }}</option>
                 @foreach ($entryHours as $hour => $label)
-                    <option value="{{ $hour }}" class="text-brand-900" @selected($hour === 14)>{{ $label }}</option>
+                    <option value="{{ $hour }}" class="text-brand-900">{{ $label }}</option>
                 @endforeach
             </select>
         </span>
@@ -76,8 +78,9 @@
             <span class="min-w-0 flex-1">
                 <label for="availability-hours" class="{{ $labelClass }} block">{{ __('Duration') }}</label>
                 <select id="availability-hours" name="hours" class="{{ $controlClass }} mt-1">
+                    <option value="" class="text-brand-900" selected>{{ __('Select duration') }}</option>
                     @foreach ($durations as $hours)
-                        <option value="{{ $hours }}" class="text-brand-900" @selected($hours === 24)>
+                        <option value="{{ $hours }}" class="text-brand-900">
                             {{ $hours === 24 ? __('24 hours (overnight)') : __(':hours hours', ['hours' => $hours]) }}
                         </option>
                     @endforeach

@@ -22,6 +22,14 @@
 | **{{ __('Balance') }}** | ₱{{ number_format($reservation->balance) }} |
 </x-mail::table>
 
+{{-- Days with gaps are spelled out in full. The table above abbreviates a long list, and
+     a guest must never have to guess which days they are actually paying for. --}}
+@if ($reservation->hasGaps())
+**{{ trans_choice('{1} Your booking covers this day only:|[2,*] Your booking covers these :count days only:', $reservation->days, ['count' => $reservation->days]) }}** {{ \App\Support\DateList::label($reservation->dates) }}
+
+{{ __('The days in between are not included.') }}
+@endif
+
 @if ($outro)
 {{ $outro }}
 @endif

@@ -88,13 +88,13 @@ class extends Component {
     {
         $limit = self::RECENT_LIMIT;
 
-        $halls = Booking::with('hall')->latest()->limit($limit)->get()
+        $halls = Booking::with(['hall', 'dates'])->latest()->limit($limit)->get()
             ->map(fn (Booking $booking) => ReservationSummary::fromHallBooking($booking));
 
-        $rooms = RoomBooking::with('room')->latest()->limit($limit)->get()
+        $rooms = RoomBooking::with(['room', 'dates'])->latest()->limit($limit)->get()
             ->map(fn (RoomBooking $booking) => ReservationSummary::fromRoomBooking($booking));
 
-        $catering = CateringOrder::with('package')->latest()->limit($limit)->get()
+        $catering = CateringOrder::with(['package', 'dates'])->latest()->limit($limit)->get()
             ->map(fn (CateringOrder $order) => ReservationSummary::fromCateringOrder($order));
 
         return $halls->concat($rooms)->concat($catering)

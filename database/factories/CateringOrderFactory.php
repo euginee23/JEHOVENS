@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\BookingStatus;
 use App\Models\CateringOrder;
 use App\Models\CateringPackage;
+use App\Support\DateRange;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -40,22 +41,29 @@ class CateringOrderFactory extends Factory
 
     /**
      * Settle the date range, then fill the money columns from the package's own pricing.
+     *
+     * Orders built here always run over consecutive days. One that needs days with gaps in
+     * them calls `syncDates()` on the result and says so out loud.
      */
     public function configure(): static
     {
-        return $this->afterMaking(function (CateringOrder $order) {
-            // Both ends are settled here rather than in a state, so an explicit
-            // `start_date` passed to create() is the one the range is measured from.
-            $order->end_date ??= $order->start_date->copy()->addDays(max($order->days, 1) - 1);
-            $order->days = (int) $order->start_date->diffInDays($order->end_date) + 1;
+        return $this
+            ->afterMaking(function (CateringOrder $order) {
+                // Both ends are settled here rather than in a state, so an explicit
+                // `start_date` passed to create() is the one the range is measured from.
+                $order->end_date ??= $order->start_date->copy()->addDays(max($order->days, 1) - 1);
+                $order->days = (int) $order->start_date->diffInDays($order->end_date) + 1;
 
-            $quote = $order->package->quote($order->guests, $order->include_skirting, $order->days);
+                $quote = $order->package->quote($order->guests, $order->include_skirting, $order->days);
 
-            $order->forceFill([
-                'price_per_head' => $order->package->price_per_head,
-                ...$quote,
-            ]);
-        });
+                $order->forceFill([
+                    'price_per_head' => $order->package->price_per_head,
+                    ...$quote,
+                ]);
+            })
+            ->afterCreating(function (CateringOrder $order) {
+                $order->syncDates(DateRange::daysBetween($order->start_date, $order->end_date));
+            });
     }
 
     /**

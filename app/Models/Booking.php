@@ -3,7 +3,10 @@
 namespace App\Models;
 
 use App\Enums\BookingStatus;
+use App\Enums\PaymentStatus;
+use App\Models\Concerns\HasReservationDates;
 use App\Models\Concerns\ManagesReservationLifecycle;
+use App\Models\Contracts\Reservation;
 use Carbon\CarbonInterface;
 use Database\Factories\BookingFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -16,8 +19,12 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
- * A booking runs from `start_date` to `end_date` inclusive, and `days` counts those days.
- * The same time window is held on every one of them, so `start_hour`, `end_hour` and
+ * The days a booking covers are listed in `dates()`, and `days` counts them. They need not
+ * be consecutive: `start_date` and `end_date` are only their outer bounds, kept so the
+ * admin filters and sorting have one indexed column to work on. A booking of the 9th and
+ * the 20th spans eleven days and is `days = 2` — the ten days between were never sold.
+ *
+ * The same time window is held on every day chosen, so `start_hour`, `end_hour` and
  * `hours` all describe a single day: a three-day booking of an 8-hour slot is `hours = 8`
  * and `days = 3`, and its `rent_total` already covers all three days.
  *
@@ -42,6 +49,15 @@ use Illuminate\Support\Str;
  * @property int $balance
  * @property CarbonInterface|null $balance_settled_at
  * @property BookingStatus $status
+ * @property string|null $payment_provider
+ * @property PaymentStatus $payment_status
+ * @property string|null $payment_session_id
+ * @property string|null $payment_intent_id
+ * @property string|null $payment_reference
+ * @property string|null $payment_method
+ * @property int|null $paid_amount
+ * @property Carbon|null $paid_at
+ * @property Carbon|null $payment_expires_at
  * @property string|null $admin_note
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -53,11 +69,26 @@ use Illuminate\Support\Str;
     'start_date', 'end_date', 'days', 'start_hour', 'end_hour', 'hours', 'include_skirting',
     'rent_total', 'skirting_total', 'total', 'downpayment', 'balance', 'status',
     'balance_settled_at', 'admin_note',
+    'payment_provider', 'payment_status', 'payment_session_id', 'payment_intent_id',
+    'payment_reference', 'payment_method', 'paid_amount', 'paid_at', 'payment_expires_at',
 ])]
-class Booking extends Model
+class Booking extends Model implements Reservation
 {
-    /** @use HasFactory<BookingFactory> */
-    use HasFactory, ManagesReservationLifecycle;
+    /**
+     * @use HasFactory<BookingFactory>
+     * @use HasReservationDates<BookingDate>
+     */
+    use HasFactory, HasReservationDates, ManagesReservationLifecycle;
+
+    /**
+     * This type keeps its dates in its own table.
+     *
+     * @return class-string<BookingDate>
+     */
+    public function dateModel(): string
+    {
+        return BookingDate::class;
+    }
 
     /**
      * Get the attributes that should be cast.
@@ -81,6 +112,10 @@ class Booking extends Model
             'balance' => 'integer',
             'balance_settled_at' => 'datetime',
             'status' => BookingStatus::class,
+            'payment_status' => PaymentStatus::class,
+            'paid_amount' => 'integer',
+            'paid_at' => 'datetime',
+            'payment_expires_at' => 'datetime',
         ];
     }
 
@@ -121,6 +156,20 @@ class Booking extends Model
     public function amountPaidColumn(): string
     {
         return 'downpayment';
+    }
+
+    /**
+     * Whether the event is over.
+     *
+     * The closing hour on the last day, not merely the day itself: completing a booking
+     * puts its days back on sale, and a morning event must not free the hall for an
+     * evening one while it is still running.
+     */
+    public function hasFinished(): bool
+    {
+        $last = $this->lastDate();
+
+        return $last !== null && $last->startOfDay()->addHours($this->end_hour)->isPast();
     }
 
     /**

@@ -3,10 +3,13 @@
 namespace App\Support;
 
 use App\Models\Booking;
+use App\Models\Contracts\Schedulable;
 use App\Models\Hall;
 use App\Models\Room;
 use App\Models\RoomBooking;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 
 /**
@@ -49,17 +52,18 @@ readonly class Availability
     {
         $occupied = [];
 
-        $bookings = Booking::query()
-            ->blocking()
-            ->where('hall_id', $hallId)
-            ->whereDate('start_date', '<=', $until)
-            ->whereDate('end_date', '>=', $from)
-            ->get(['start_date', 'end_date', 'start_hour', 'end_hour']);
+        // Read off the days themselves rather than the span between them: a booking of
+        // the 9th and the 20th must leave the ten days in between open.
+        $bookings = self::withDatesIn(
+            Booking::query()->blocking()->where('hall_id', $hallId),
+            $from,
+            $until,
+        )->get(['id', 'start_hour', 'end_hour']);
 
         foreach ($bookings as $booking) {
-            // The same hours are held on every day the booking runs for.
-            foreach (self::datesBetween($booking->start_date, $booking->end_date) as $date) {
-                $occupied[$date][] = [$booking->start_hour, $booking->end_hour];
+            // The same hours are held on every day the booking covers.
+            foreach ($booking->dates as $date) {
+                $occupied[$date->iso()][] = [$booking->start_hour, $booking->end_hour];
             }
         }
 
@@ -71,39 +75,133 @@ readonly class Availability
      */
     public static function forRoom(int $roomId, CarbonInterface $from, CarbonInterface $until): self
     {
-        $occupied = [];
-
-        $bookings = RoomBooking::query()
-            ->blocking()
-            ->where('room_id', $roomId)
-            ->whereDate('starts_at', '<=', $until)
-            ->whereDate('ends_at', '>=', $from)
-            ->get(['starts_at', 'ends_at']);
-
-        foreach ($bookings as $booking) {
-            // A stay is one continuous span, so clip it to each day it touches.
-            foreach (self::datesBetween($booking->starts_at, $booking->ends_at) as $date) {
-                $dayStart = Carbon::parse($date)->startOfDay();
-                $dayEnd = $dayStart->copy()->addDay();
-
-                $overlapStart = $booking->starts_at->greaterThan($dayStart) ? $booking->starts_at : $dayStart;
-                $overlapEnd = $booking->ends_at->lessThan($dayEnd) ? $booking->ends_at : $dayEnd;
-
-                // A stay ending at midnight touches the next date without occupying it.
-                if ($overlapEnd->lessThanOrEqualTo($overlapStart)) {
-                    continue;
-                }
-
-                $occupied[$date][] = [
-                    (int) floor($dayStart->diffInMinutes($overlapStart) / 60),
-                    (int) ceil($dayStart->diffInMinutes($overlapEnd) / 60),
-                ];
-            }
-        }
+        // A day earlier than asked for, so a stay checking in yesterday and running past
+        // midnight is counted against this morning.
+        $occupied = self::roomOccupancy($roomId, $from->copy()->subDay(), $until);
 
         // Guests may check in as late as ENTRY_CLOSES_AT and stay past midnight, so the
         // window that has to be free runs to the end of that hour.
         return self::classify($occupied, Room::ENTRY_OPENS_AT, Room::ENTRY_CLOSES_AT + 1, $from, $until);
+    }
+
+    /**
+     * The hours the given room is already taken for, by date.
+     *
+     * Derived from the days each stay holds rather than from the span between check-in and
+     * check-out, so a guest booking day use on the 5th and the 20th leaves the fortnight
+     * between them open.
+     *
+     * @return array<string, array<int, array{int, int}>>
+     */
+    public static function roomOccupancy(int $roomId, CarbonInterface $from, CarbonInterface $until, ?int $ignoring = null): array
+    {
+        $occupied = [];
+
+        $bookings = self::withDatesIn(
+            RoomBooking::query()
+                ->blocking()
+                ->where('room_id', $roomId)
+                ->when($ignoring, fn ($query) => $query->whereKeyNot($ignoring)),
+            $from,
+            $until,
+        )->get(['id', 'starts_at', 'hours', 'nights']);
+
+        foreach ($bookings as $booking) {
+            // An overnight stay holds each of its nights around the clock; day use holds
+            // the same block of hours on each day it was sold for.
+            $perDay = $booking->isOvernight() ? Room::HOURS_PER_NIGHT : $booking->hours;
+
+            foreach (self::intervalsFor($booking->dateList(), $booking->starts_at->hour, $perDay) as $date => $intervals) {
+                $occupied[$date] = [...($occupied[$date] ?? []), ...$intervals];
+            }
+        }
+
+        return $occupied;
+    }
+
+    /**
+     * The hours a stay of `$hoursPerDay` from `$entryHour` takes up on each of `$dates`.
+     *
+     * A block running past midnight spills onto the following date, which is how a stay
+     * checking in at 10 PM keeps the small hours of the next morning.
+     *
+     * @param  array<int, string>  $dates  ISO dates
+     * @return array<string, array<int, array{int, int}>>
+     */
+    public static function intervalsFor(array $dates, int $entryHour, int $hoursPerDay): array
+    {
+        $intervals = [];
+
+        foreach ($dates as $date) {
+            $ends = $entryHour + $hoursPerDay;
+
+            $intervals[$date][] = [$entryHour, min($ends, 24)];
+
+            if ($ends > 24) {
+                $spill = Carbon::parse($date)->addDay()->toDateString();
+
+                $intervals[$spill][] = [0, $ends - 24];
+            }
+        }
+
+        return $intervals;
+    }
+
+    /**
+     * Which of the given days the reservations matched by `$query` already cover.
+     *
+     * The window is narrowed in SQL so the index on `date` does the work, and the exact
+     * days are matched in PHP: a `date` column reads back as a plain date on MySQL and as
+     * a midnight timestamp on SQLite, and one `IN` list cannot match both.
+     *
+     * @template TReservation of Model&Schedulable
+     *
+     * @param  Builder<TReservation>  $query
+     * @param  array<int, string>  $dates  ISO dates
+     * @return array<int, string>
+     */
+    public static function takenDates(Builder $query, array $dates): array
+    {
+        if ($dates === []) {
+            return [];
+        }
+
+        sort($dates);
+
+        $reservations = self::withDatesIn(
+            $query,
+            Carbon::parse($dates[0]),
+            Carbon::parse($dates[count($dates) - 1]),
+        )->get(['id']);
+
+        $covered = $reservations
+            ->flatMap(fn (Schedulable $reservation): array => $reservation->dateList())
+            ->unique()
+            ->all();
+
+        return array_values(array_intersect($dates, $covered));
+    }
+
+    /**
+     * Whether any of the wanted hours run into hours already taken.
+     *
+     * @param  array<string, array<int, array{int, int}>>  $wanted
+     * @param  array<string, array<int, array{int, int}>>  $occupied
+     */
+    public static function clashes(array $wanted, array $occupied): bool
+    {
+        foreach ($wanted as $date => $intervals) {
+            foreach ($intervals as [$start, $end]) {
+                foreach ($occupied[$date] ?? [] as [$takenStart, $takenEnd]) {
+                    // Half-open: a stay ending exactly as another begins is no clash.
+                    if ($start < $takenEnd && $end > $takenStart) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -144,20 +242,47 @@ readonly class Availability
     }
 
     /**
-     * Whether every date from `$start` to `$end` inclusive can still be booked.
+     * Whether any of the given dates can no longer be booked.
      *
-     * A guest picking the far end of a range must not be able to book straight through a
-     * day that is already full, so the calendar closes off any end date that would.
+     * Guests pick their days one at a time, so this checks the days they actually chose
+     * rather than everything between the first and the last.
+     *
+     * @param  array<int, string>  $dates  ISO dates
      */
-    public function rangeIsClear(string $start, string $end): bool
+    public function anyUnavailable(array $dates): bool
     {
-        foreach (self::datesBetween(Carbon::parse($start), Carbon::parse($end)) as $date) {
+        foreach ($dates as $date) {
             if ($this->isUnavailable($date)) {
-                return false;
+                return true;
             }
         }
 
-        return true;
+        return false;
+    }
+
+    /**
+     * Narrow a reservation query to those covering a day inside the window, with exactly
+     * those days loaded.
+     *
+     * Two queries rather than one join, so each reservation still arrives as one model
+     * with its own list of days.
+     *
+     * @template TReservation of Model&Schedulable
+     *
+     * @param  Builder<TReservation>  $query
+     * @return Builder<TReservation>
+     */
+    private static function withDatesIn(Builder $query, CarbonInterface $from, CarbonInterface $until): Builder
+    {
+        // Half-open on the far end rather than BETWEEN: a `date` column reads back as a
+        // midnight timestamp on SQLite, which sorts *after* the bare date it equals, so an
+        // inclusive upper bound would drop the last day of the window.
+        $start = $from->copy()->startOfDay()->toDateString();
+        $end = $until->copy()->startOfDay()->addDay()->toDateString();
+
+        $within = fn ($dates) => $dates->where('date', '>=', $start)->where('date', '<', $end);
+
+        return $query->whereHas('dates', $within)->with(['dates' => $within]);
     }
 
     /**
@@ -174,7 +299,7 @@ readonly class Availability
         $partial = [];
         $busyLabels = [];
 
-        foreach (self::datesBetween($from, $until) as $date) {
+        foreach (DateRange::daysBetween($from, $until) as $date) {
             $intervals = self::merge($occupied[$date] ?? []);
 
             if ($intervals === []) {
@@ -226,29 +351,6 @@ readonly class Availability
         }
 
         return $merged;
-    }
-
-    /**
-     * Every ISO date from one moment to another, inclusive of both ends.
-     *
-     * The cursor is reassigned rather than advanced in place: this application sets
-     * `Date::use(CarbonImmutable::class)`, so the dates handed in by an Eloquent cast are
-     * immutable and `$cursor->addDay()` on its own would never move.
-     *
-     * @return array<int, string>
-     */
-    private static function datesBetween(CarbonInterface $from, CarbonInterface $until): array
-    {
-        $dates = [];
-        $cursor = $from->copy()->startOfDay();
-        $last = $until->copy()->startOfDay();
-
-        while ($cursor->lte($last)) {
-            $dates[] = $cursor->toDateString();
-            $cursor = $cursor->addDay();
-        }
-
-        return $dates;
     }
 
     /**

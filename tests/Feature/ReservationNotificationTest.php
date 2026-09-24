@@ -87,6 +87,39 @@ test('settling the balance emails the guest a receipt', function () {
     Notification::assertSentOnDemand(ReservationBalanceSettled::class, addressedTo('juan@example.com'));
 });
 
+/**
+ * Completing a booking settles whatever was still owed, so the guest is owed a receipt
+ * for that money as much as they would be if an admin had clicked "Balance paid".
+ */
+test('completing a booking that still owes money emails both the status change and the balance receipt', function () {
+    // Finished, because a booking can only be completed once its event is over.
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create([
+        'guest_email' => 'juan@example.com',
+        'start_date' => today()->subWeek()->toDateString(),
+    ]);
+
+    expect($booking->hasOutstandingBalance())->toBeTrue();
+    expect($booking->transitionTo(BookingStatus::Completed))->toBeTrue();
+
+    Notification::assertSentOnDemand(ReservationStatusChanged::class, addressedTo('juan@example.com'));
+    Notification::assertSentOnDemand(ReservationBalanceSettled::class, addressedTo('juan@example.com'));
+});
+
+test('completing a booking that is already paid up sends only the status change', function () {
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create([
+        'guest_email' => 'juan@example.com',
+        'start_date' => today()->subWeek()->toDateString(),
+    ]);
+    $booking->settleBalance();
+
+    Notification::fake();
+
+    expect($booking->transitionTo(BookingStatus::Completed))->toBeTrue();
+
+    Notification::assertSentOnDemand(ReservationStatusChanged::class, addressedTo('juan@example.com'));
+    Notification::assertNotSentTo(new AnonymousNotifiable, ReservationBalanceSettled::class);
+});
+
 test('settling an already-settled balance sends nothing', function () {
     $booking = Booking::factory()->for($this->hall)->confirmed()->create();
 

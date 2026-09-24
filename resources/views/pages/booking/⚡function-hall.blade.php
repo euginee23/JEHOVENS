@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\BookingStatus;
-use App\Livewire\BooksDateRangeComponent;
+use App\Enums\PaymentStatus;
+use App\Livewire\BooksDatesComponent;
 use App\Models\Booking;
 use App\Models\Hall;
 use App\Support\Availability;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -17,7 +19,7 @@ use Livewire\Attributes\Title;
 new
 #[Layout('layouts::marketing')]
 #[Title('Book a Function Hall')]
-class extends BooksDateRangeComponent {
+class extends BooksDatesComponent {
     public ?int $hall_id = null;
 
     public ?int $start_hour = null;
@@ -26,35 +28,22 @@ class extends BooksDateRangeComponent {
 
     public bool $include_skirting = true;
 
-    public string $guest_name = '';
-
-    public string $guest_phone = '';
-
-    public string $guest_email = '';
-
     /**
-     * Whether the GCash panel is open, i.e. the form validated and we are waiting
-     * for the guest to say they have sent the downpayment.
-     */
-    public bool $showPayment = false;
-
-    /**
-     * The reference of the booking just created, which switches the page to the
-     * confirmation view.
-     */
-    public ?string $reference = null;
-
-    /**
-     * Prefill the contact fields for a signed-in guest.
+     * Take the contact details of a signed-in guest, and whatever a guest coming back
+     * from PayMongo brought with them.
      */
     public function mount(): void
     {
-        if ($user = Auth::user()) {
-            $this->guest_name = $user->name;
-            $this->guest_email = $user->email;
-        }
-
+        $this->prefillFromSession();
         $this->discardUnusableDate();
+    }
+
+    /**
+     * How the payment routes name this page.
+     */
+    protected function reservationType(): string
+    {
+        return 'hall';
     }
 
     /**
@@ -77,9 +66,22 @@ class extends BooksDateRangeComponent {
     {
         return [
             'hall_id' => ['required', 'integer', 'exists:halls,id'],
-            'start_date' => ['required', 'date', 'after_or_equal:today'],
-            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
-            'start_hour' => ['required', 'integer', 'min:'.Hall::OPENS_AT, 'max:'.(Hall::CLOSES_AT - Hall::HOURS_PER_BLOCK)],
+            'dates' => [
+                'required',
+                'array',
+                'min:1',
+                'max:'.self::MAX_DATES,
+                function (string $attribute, mixed $value, callable $fail) {
+                    foreach ((array) $value as $date) {
+                        if (rescue(fn () => Carbon::parse($date)->startOfDay(), null, report: false)?->lt(today()) ?? true) {
+                            $fail(__('Pick dates from today onwards.'));
+
+                            return;
+                        }
+                    }
+                },
+            ],
+            'start_hour' => ['required', 'integer', 'min:'.Hall::OPENS_AT, 'max:'.(Hall::CLOSES_AT - Hall::MINIMUM_HOURS)],
             'end_hour' => [
                 'required',
                 'integer',
@@ -90,15 +92,13 @@ class extends BooksDateRangeComponent {
                         return;
                     }
 
-                    if (($value - $this->start_hour) % Hall::HOURS_PER_BLOCK !== 0) {
-                        $fail(__('Halls are rented in blocks of :hours hours, so pick 4, 8, or 12 hours.', ['hours' => Hall::HOURS_PER_BLOCK]));
+                    if (($value - $this->start_hour) < Hall::MINIMUM_HOURS) {
+                        $fail(__('A hall is booked for at least :hours hours.', ['hours' => Hall::MINIMUM_HOURS]));
                     }
                 },
             ],
             'include_skirting' => ['boolean'],
-            'guest_name' => ['required', 'string', 'min:2', 'max:100'],
-            'guest_phone' => ['required', 'string', 'regex:/^09\d{9}$/'],
-            'guest_email' => ['required', 'email:rfc', 'max:255'],
+            ...$this->guestRules(),
         ];
     }
 
@@ -111,9 +111,8 @@ class extends BooksDateRangeComponent {
     {
         return [
             'hall_id.required' => __('Choose a function hall first.'),
-            'start_date.required' => __('Pick your dates on the calendar.'),
-            'start_date.after_or_equal' => __('Pick a date from today onwards.'),
-            'end_date.after_or_equal' => __('The last day cannot come before the first.'),
+            'dates.required' => __('Pick at least one date on the calendar.'),
+            'dates.max' => __('A booking can cover at most :count days.', ['count' => self::MAX_DATES]),
             'end_hour.gt' => __('The end time has to be after the start time.'),
             'guest_phone.regex' => __('Enter an 11-digit mobile number starting with 09, e.g. 09123456789.'),
         ];
@@ -147,7 +146,7 @@ class extends BooksDateRangeComponent {
     #[Computed]
     public function quote(): ?array
     {
-        if (! $this->hall || ! $this->hours || ! $this->hasDateRange()) {
+        if (! $this->hall || ! $this->hours || ! $this->hasDates()) {
             return null;
         }
 
@@ -166,7 +165,7 @@ class extends BooksDateRangeComponent {
 
         $hours = $this->end_hour - $this->start_hour;
 
-        return $hours > 0 && $hours % Hall::HOURS_PER_BLOCK === 0 ? $hours : null;
+        return $hours >= Hall::MINIMUM_HOURS ? $hours : null;
     }
 
     /**
@@ -177,11 +176,14 @@ class extends BooksDateRangeComponent {
     #[Computed]
     public function startHours(): array
     {
-        return $this->hourOptions(Hall::OPENS_AT, Hall::CLOSES_AT - Hall::HOURS_PER_BLOCK);
+        return $this->hourOptions(Hall::OPENS_AT, Hall::CLOSES_AT - Hall::MINIMUM_HOURS);
     }
 
     /**
-     * Selectable end times — always a whole number of blocks after the start time.
+     * Selectable end times — any whole hour from the minimum booking length onwards.
+     *
+     * Stepping by the hour rather than by the block is what lets a guest book 7:00 AM to
+     * 12:00 PM; billing still rounds those five hours up to two blocks.
      *
      * @return array<int, string>
      */
@@ -194,7 +196,7 @@ class extends BooksDateRangeComponent {
 
         $options = [];
 
-        for ($hour = $this->start_hour + Hall::HOURS_PER_BLOCK; $hour <= Hall::CLOSES_AT; $hour += Hall::HOURS_PER_BLOCK) {
+        for ($hour = $this->start_hour + Hall::MINIMUM_HOURS; $hour <= Hall::CLOSES_AT; $hour++) {
             $options[$hour] = $this->formatHour($hour);
         }
 
@@ -233,42 +235,40 @@ class extends BooksDateRangeComponent {
     }
 
     /**
-     * Validate the form and open the GCash panel.
+     * Write the booking and send the guest to PayMongo to pay for it.
+     *
+     * The booking is written first, and that is what holds its dates while the guest is
+     * on PayMongo's page — Pending already blocks. It stays unconfirmed until PayMongo
+     * says the money arrived, and is released again if it never does.
      */
-    public function proceedToPayment(): void
+    public function proceedToPayment(): mixed
     {
-        $this->validate();
-        $this->assertSlotIsAvailable();
+        if (! $this->paymentsAvailable) {
+            throw ValidationException::withMessages([
+                'dates' => __('Online payment is temporarily unavailable. Please call the resort to book.'),
+            ]);
+        }
 
-        $this->showPayment = true;
-    }
-
-    /**
-     * Close the GCash panel without booking.
-     */
-    public function cancelPayment(): void
-    {
-        $this->showPayment = false;
-    }
-
-    /**
-     * Record the booking as pending once the guest says the downpayment is sent.
-     */
-    public function confirmPayment(): void
-    {
         $validated = $this->validate();
+        unset($validated['dates']);
+
+        $this->assertSlotIsAvailable();
 
         $quote = $this->hall->quote($this->hours, $this->include_skirting, $this->days);
 
         // Two guests can reach this point for the same slot at once, so the last check
-        // runs inside the transaction that writes the booking, holding the rows it read.
+        // runs inside the transaction that writes the booking, behind the hall's row lock.
         $booking = DB::transaction(function () use ($validated, $quote) {
             $this->assertSlotIsAvailable(lock: true);
 
-            return Booking::create([
+            $booking = Booking::create([
                 ...$validated,
                 'reference' => Booking::generateReference(),
                 'user_id' => Auth::id(),
+                // Overwritten by syncDates() below; set here because the columns are
+                // NOT NULL and the row has to exist before its days can be written.
+                'start_date' => $this->firstDate(),
+                'end_date' => $this->lastDate(),
                 'hours' => $this->hours,
                 'days' => $this->days,
                 'rent_total' => $quote['rent_total'],
@@ -277,13 +277,17 @@ class extends BooksDateRangeComponent {
                 'downpayment' => $quote['downpayment'],
                 'balance' => $quote['balance'],
                 'status' => BookingStatus::Pending,
+                'payment_provider' => 'paymongo',
+                'payment_status' => PaymentStatus::Awaiting,
+                'payment_expires_at' => now()->addMinutes((int) config('services.paymongo.hold_minutes')),
             ]);
+
+            $booking->syncDates($this->bookedDates());
+
+            return $booking;
         });
 
-        $booking->sendPlacementNotifications();
-
-        $this->showPayment = false;
-        $this->reference = $booking->reference;
+        return $this->sendToCheckout($booking, $quote['downpayment'], $this->hall->name);
     }
 
     /**
@@ -291,8 +295,8 @@ class extends BooksDateRangeComponent {
      */
     public function bookAnother(): void
     {
-        $this->reset(['hall_id', 'start_hour', 'end_hour', 'reference', 'showPayment']);
-        $this->resetDateRange();
+        $this->reset(['hall_id', 'start_hour', 'end_hour', 'reference', 'paymentError']);
+        $this->resetDates();
         $this->include_skirting = true;
         $this->mount();
     }
@@ -305,25 +309,25 @@ class extends BooksDateRangeComponent {
      */
     protected function assertSlotIsAvailable(bool $lock = false): void
     {
-        $query = Booking::query()
+        if ($lock) {
+            // Everyone booking this hall queues behind its row, so the check below and the
+            // insert that follows cannot interleave with another guest's. Locking the
+            // booking query instead would be a bet on gap locks in an empty result.
+            Hall::query()->whereKey($this->hall_id)->lockForUpdate()->first();
+        }
+
+        $clashing = Booking::query()
             ->blocking()
             ->where('hall_id', $this->hall_id)
-            ->whereDate('start_date', '<=', $this->end_date)
-            ->whereDate('end_date', '>=', $this->start_date)
+            // Half-open on both ends, so an event ending as another begins is no clash.
             ->where('start_hour', '<', $this->end_hour)
             ->where('end_hour', '>', $this->start_hour);
 
-        if ($lock) {
-            $query->lockForUpdate();
-        }
-
-        if ($query->exists()) {
-            $this->showPayment = false;
-
+        if (Availability::takenDates($clashing, $this->bookedDates()) !== []) {
             unset($this->availability);
 
             throw ValidationException::withMessages([
-                'start_date' => __('That hall is already booked for part of this time slot. Please pick another time or date.'),
+                'dates' => __('That hall is already booked at this time on one of your dates. Remove that date, or pick another time.'),
             ]);
         }
     }
@@ -370,7 +374,11 @@ class extends BooksDateRangeComponent {
                     <h1 class="mt-8 font-serif text-4xl font-medium text-brand-900">{{ __('Booking received') }}</h1>
 
                     <p class="mt-3 text-brand-800/70">
-                        {{ __('We are verifying your downpayment. You will get a confirmation once it clears — usually within 24 hours.') }}
+                        @if ($this->booking->payment_status === \App\Enums\PaymentStatus::Paid)
+                            {{ __('Your payment has gone through and your booking is confirmed. We have emailed you a copy.') }}
+                        @else
+                            {{ __('We are waiting for your payment to clear. You will get an email the moment it does.') }}
+                        @endif
                     </p>
 
                     <dl class="mt-8 divide-y divide-sand-200 border-y border-sand-200 text-sm">
@@ -378,8 +386,9 @@ class extends BooksDateRangeComponent {
                             $booking = $this->booking;
                             $rows = [
                                 __('Reference') => $booking->reference,
+                                ...($booking->payment_reference ? [__('Payment reference') => $booking->payment_reference] : []),
                                 __('Hall') => $booking->hall->name,
-                                trans_choice('{1} Date|[2,*] Dates', $booking->days) => \App\Support\DateRange::label($booking->start_date, $booking->end_date)
+                                trans_choice('{1} Date|[2,*] Dates', $booking->days) => \App\Support\DateList::label($booking->dateList())
                                     .($booking->days > 1 ? ' ('.trans_choice('{1} :count day|[2,*] :count days', $booking->days, ['count' => $booking->days]).')' : ''),
                                 __('Time') => $this->formatHour($booking->start_hour).' – '.$this->formatHour($booking->end_hour)
                                     .' ('.trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours])
@@ -554,18 +563,17 @@ class extends BooksDateRangeComponent {
                         <div>
                             <x-booking.availability-calendar
                                 :month="$this->calendar"
-                                :start="$start_date"
-                                :end="$end_date"
+                                :dates="$dates"
                                 :availability="$this->availability"
                                 :label="__('Select your dates')"
                                 :hint="$this->hall
-                                    ? __('Tap a day to book it. Tap a later day to run the event across several days.')
+                                    ? __('Tap each day you need. Tap it again to remove it — the days need not be in a row.')
                                     : __('Pick a hall first to see which dates are still open.')"
                             />
 
-                            @if ($this->hasDateRange())
+                            @if ($this->hasDates())
                                 <p class="mt-2 text-sm font-medium text-brand-900">
-                                    {{ $this->rangeLabel }}
+                                    {{ $this->datesLabel }}
                                     @if ($this->days > 1)
                                         <span class="text-brand-800/60">
                                             {{ trans_choice('{1} · :count day|[2,*] · :count days', $this->days, ['count' => $this->days]) }}
@@ -574,10 +582,7 @@ class extends BooksDateRangeComponent {
                                 </p>
                             @endif
 
-                            @error('start_date')
-                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
-                            @enderror
-                            @error('end_date')
+                            @error('dates')
                                 <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
                             @enderror
                         </div>
@@ -603,7 +608,7 @@ class extends BooksDateRangeComponent {
                             </div>
 
                             <p class="mt-2 text-xs text-brand-800/60">
-                                {{ __('Open 7:00 AM to 10:00 PM. Halls are rented in blocks of 4 hours.') }}
+                                {{ __('Open 7:00 AM to 10:00 PM. Minimum booking is 4 hours, billed in 4-hour blocks — a 5-hour booking is charged as 2 blocks.') }}
                                 @if ($this->days > 1)
                                     {{ __('These hours are held on each of your :count days.', ['count' => $this->days]) }}
                                 @endif
@@ -655,6 +660,16 @@ class extends BooksDateRangeComponent {
                                         <dd class="font-medium text-brand-900">₱{{ number_format($this->quote['rent_total']) }}</dd>
                                     </div>
 
+                                    {{-- Without this, a 5-hour and an 8-hour booking costing the same reads as a bug. --}}
+                                    @if ($this->hours % \App\Models\Hall::HOURS_PER_BLOCK !== 0)
+                                        <p class="text-xs text-brand-800/60">
+                                            {{ __('Your :hours hours run into a block of :block hours, which is billed whole.', [
+                                                'hours' => $this->hours,
+                                                'block' => \App\Models\Hall::HOURS_PER_BLOCK,
+                                            ]) }}
+                                        </p>
+                                    @endif
+
                                     @if ($this->quote['skirting_total'] > 0)
                                         <div class="flex justify-between gap-4">
                                             <dt class="text-brand-800/70">
@@ -689,81 +704,17 @@ class extends BooksDateRangeComponent {
                             class="eyebrow w-full bg-brand-800 px-6 py-4 text-[11px] text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
                             wire:loading.attr="disabled"
                         >
-                            <span wire:loading.remove wire:target="proceedToPayment">{{ __('Proceed to payment') }}</span>
-                            <span wire:loading wire:target="proceedToPayment">{{ __('Checking availability…') }}</span>
+                            <span wire:loading.remove wire:target="proceedToPayment">{{ __('Pay :amount and book', ['amount' => $this->quote ? '₱'.number_format($this->quote['downpayment']) : '']) }}</span>
+                            <span wire:loading wire:target="proceedToPayment">{{ __('Taking you to the payment page…') }}</span>
                         </button>
+
+                        <p class="text-center text-xs text-brand-800/60">
+                            {{ __('You will be taken to PayMongo to pay by GCash, Maya, GrabPay or card. Your dates are held while you pay.') }}
+                        </p>
                     </form>
                 </div>
             </div>
         </section>
 
-        {{-- GCash panel --}}
-        @if ($showPayment && $this->quote)
-            <div
-                class="fixed inset-0 z-60 flex items-end justify-center bg-brand-950/70 p-4 backdrop-blur-sm sm:items-center"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="payment-title"
-            >
-                <div class="max-h-full w-full max-w-md overflow-y-auto border-t-2 border-gold-400 bg-white p-6 shadow-2xl sm:p-8">
-                    <div class="flex items-start justify-between gap-4">
-                        <h2 id="payment-title" class="font-serif text-2xl font-medium text-brand-900">{{ __('GCash payment') }}</h2>
-
-                        <button
-                            type="button"
-                            wire:click="cancelPayment"
-                            class="-me-2 -mt-1 flex size-9 items-center justify-center text-brand-800/60 transition-colors hover:bg-sand-100 hover:text-brand-900"
-                        >
-                            <span class="sr-only">{{ __('Close') }}</span>
-                            <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    </div>
-
-                    <p class="mt-4 text-sm text-brand-800/70">{{ __('Send this amount to hold your date:') }}</p>
-
-                    <p class="mt-1 font-serif text-5xl font-medium text-brand-800">₱{{ number_format($this->quote['downpayment']) }}</p>
-
-                    <dl class="mt-6 space-y-2.5 bg-sand-100 p-5 text-sm">
-                        <div class="flex justify-between gap-4">
-                            <dt class="text-brand-800/60">{{ __('Merchant') }}</dt>
-                            <dd class="font-medium text-brand-900">{{ config('app.name') }}</dd>
-                        </div>
-                        <div class="flex justify-between gap-4">
-                            <dt class="text-brand-800/60">{{ __('GCash number') }}</dt>
-                            <dd class="font-medium text-brand-900">{{ config('resort.gcash.number') }}</dd>
-                        </div>
-                        <div class="flex justify-between gap-4">
-                            <dt class="text-brand-800/60">{{ __('Account name') }}</dt>
-                            <dd class="font-medium text-brand-900">{{ config('resort.gcash.account_name') }}</dd>
-                        </div>
-                    </dl>
-
-                    <p class="mt-4 text-sm text-brand-800/70">
-                        {{ __('Send the exact amount, then keep a screenshot of your receipt — we will ask for it if we cannot match your payment.') }}
-                    </p>
-
-                    <button
-                        type="button"
-                        wire:click="confirmPayment"
-                        class="mt-6 eyebrow w-full bg-brand-800 px-6 py-4 text-[11px] text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        wire:loading.attr="disabled"
-                        wire:target="confirmPayment"
-                    >
-                        <span wire:loading.remove wire:target="confirmPayment">{{ __('I have sent the payment') }}</span>
-                        <span wire:loading wire:target="confirmPayment">{{ __('Saving your booking…') }}</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        wire:click="cancelPayment"
-                        class="eyebrow mt-3 w-full px-6 py-3.5 text-[11px] text-brand-800/70 transition-colors hover:bg-sand-100"
-                    >
-                        {{ __('Go back') }}
-                    </button>
-                </div>
-            </div>
-        @endif
     @endif
 </div>

@@ -3,7 +3,10 @@
 namespace App\Models;
 
 use App\Enums\BookingStatus;
+use App\Enums\PaymentStatus;
+use App\Models\Concerns\HasReservationDates;
 use App\Models\Concerns\ManagesReservationLifecycle;
+use App\Models\Contracts\Reservation;
 use Carbon\CarbonInterface;
 use Database\Factories\CateringOrderFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -16,8 +19,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
- * An order runs from `start_date` to `end_date` inclusive, and `days` counts those days.
- * The same package is served to the same head count on each one, so `guests` describes a
+ * The days an order is served on are listed in `dates()`, and `days` counts them. They need
+ * not be consecutive: `start_date` and `end_date` are only their outer bounds, kept so the
+ * admin filters and sorting have one indexed column to work on.
+ *
+ * The same package is served to the same head count on each day, so `guests` describes a
  * single day: a three-day order for 100 guests is `guests = 100` and `days = 3`, and its
  * `catering_total` already covers all three days.
  *
@@ -41,6 +47,15 @@ use Illuminate\Support\Str;
  * @property int $balance
  * @property CarbonInterface|null $balance_settled_at
  * @property BookingStatus $status
+ * @property string|null $payment_provider
+ * @property PaymentStatus $payment_status
+ * @property string|null $payment_session_id
+ * @property string|null $payment_intent_id
+ * @property string|null $payment_reference
+ * @property string|null $payment_method
+ * @property int|null $paid_amount
+ * @property Carbon|null $paid_at
+ * @property Carbon|null $payment_expires_at
  * @property string|null $admin_note
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -52,11 +67,26 @@ use Illuminate\Support\Str;
     'start_date', 'end_date', 'days', 'guests', 'include_skirting', 'price_per_head', 'catering_total',
     'skirting_total', 'total', 'downpayment', 'balance', 'status',
     'balance_settled_at', 'admin_note',
+    'payment_provider', 'payment_status', 'payment_session_id', 'payment_intent_id',
+    'payment_reference', 'payment_method', 'paid_amount', 'paid_at', 'payment_expires_at',
 ])]
-class CateringOrder extends Model
+class CateringOrder extends Model implements Reservation
 {
-    /** @use HasFactory<CateringOrderFactory> */
-    use HasFactory, ManagesReservationLifecycle;
+    /**
+     * @use HasFactory<CateringOrderFactory>
+     * @use HasReservationDates<CateringOrderDate>
+     */
+    use HasFactory, HasReservationDates, ManagesReservationLifecycle;
+
+    /**
+     * This type keeps its dates in its own table.
+     *
+     * @return class-string<CateringOrderDate>
+     */
+    public function dateModel(): string
+    {
+        return CateringOrderDate::class;
+    }
 
     /**
      * Get the attributes that should be cast.
@@ -79,6 +109,10 @@ class CateringOrder extends Model
             'balance' => 'integer',
             'balance_settled_at' => 'datetime',
             'status' => BookingStatus::class,
+            'payment_status' => PaymentStatus::class,
+            'paid_amount' => 'integer',
+            'paid_at' => 'datetime',
+            'payment_expires_at' => 'datetime',
         ];
     }
 

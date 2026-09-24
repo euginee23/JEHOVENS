@@ -1,13 +1,17 @@
-{{-- A month grid for picking a date range, with days the venue is already sold out on
-     closed off. Flux Pro's date-picker is not installed, so this is hand-rolled: the
-     parent Livewire component owns the state and exposes selectDate() and shiftMonth().
+{{-- A month grid for picking the days of a booking, with days the venue is already sold
+     out on closed off. Flux Pro's date-picker is not installed, so this is hand-rolled:
+     the parent Livewire component owns the state and exposes toggleDate(), clearDates()
+     and shiftMonth().
+
+     Each day is a toggle, not one end of a range. Tapping a day takes it, tapping it
+     again gives it back, and the days need not be consecutive — which is what lets a
+     guest book three separate Saturdays, and undo a mis-tap without starting over.
 
      Availability is a convenience, not the guard — the booking pages assert the slot is
      free again on submit, under a row lock. --}}
 @props([
     'month',
-    'start' => '',
-    'end' => '',
+    'dates' => [],
     'availability',
     'label' => null,
     'hint' => null,
@@ -19,9 +23,6 @@
 
     $gridStart = $month->copy()->startOfWeek(\Carbon\CarbonInterface::MONDAY);
     $gridEnd = $month->copy()->endOfMonth()->endOfWeek(\Carbon\CarbonInterface::MONDAY);
-
-    // A range is being built when a start is set but its end is not yet chosen.
-    $choosingEnd = $start !== '' && $end === '';
 @endphp
 
 <div {{ $attributes->class(['space-y-2']) }}>
@@ -75,19 +76,11 @@
                     $outsideMonth = ! $day->isSameMonth($month);
                     $past = $day->lt($today);
                     $soldOut = $availability->isUnavailable($date);
+                    $selected = in_array($date, $dates, strict: true);
 
-                    // Once a start is picked, an end that would book straight through a
-                    // sold-out day has to be closed off too.
-                    $unreachable = $choosingEnd
-                        && $day->gt(\Illuminate\Support\Carbon::parse($start))
-                        && ! $availability->rangeIsClear($start, $date);
-
-                    $disabled = $outsideMonth || $past || $soldOut || $unreachable;
-
-                    $isStart = $start !== '' && $date === $start;
-                    $isEnd = $end !== '' && $date === $end;
-                    $inRange = $start !== '' && $end !== '' && $date > $start && $date < $end;
-                    $selected = $isStart || $isEnd;
+                    // A chosen day that has since sold out stays tappable, so the guest can
+                    // still take it back off their booking.
+                    $disabled = $outsideMonth || $past || ($soldOut && ! $selected);
                 @endphp
 
                 @if ($outsideMonth)
@@ -96,18 +89,20 @@
                     <button
                         type="button"
                         wire:key="day-{{ $date }}"
+                        aria-pressed="{{ $selected ? 'true' : 'false' }}"
                         @disabled($disabled)
-                        @if (! $disabled) wire:click="selectDate('{{ $date }}')" @endif
+                        @if (! $disabled) wire:click="toggleDate('{{ $date }}')" @endif
                         @class([
                             'relative h-9 text-sm font-medium transition',
-                            'cursor-not-allowed text-brand-800/25 line-through' => $soldOut && ! $past,
-                            'cursor-not-allowed text-brand-800/20' => $past || $unreachable,
+                            'cursor-not-allowed text-brand-800/25 line-through' => $soldOut && ! $past && ! $selected,
+                            'cursor-not-allowed text-brand-800/20' => $past,
                             'bg-brand-800 text-white' => $selected,
-                            'bg-sand-100 text-brand-900' => $inRange,
-                            'text-brand-900 hover:bg-sand-100' => ! $disabled && ! $selected && ! $inRange,
+                            'text-brand-900 hover:bg-sand-100' => ! $disabled && ! $selected,
                             'ring-1 ring-gold-400 ring-inset' => $day->isSameDay($today) && ! $selected,
                         ])
-                        @if ($soldOut)
+                        @if ($selected)
+                            aria-label="{{ __(':date — chosen, tap to remove', ['date' => $day->format('M j')]) }}"
+                        @elseif ($soldOut)
                             aria-label="{{ __(':date — fully booked', ['date' => $day->format('M j')]) }}"
                         @elseif ($availability->isPartial($date))
                             aria-label="{{ __(':date — partly booked (:hours taken)', ['date' => $day->format('M j'), 'hours' => implode(', ', $availability->busyHours($date))]) }}"
@@ -129,8 +124,26 @@
             @endfor
         </div>
 
+        {{-- What has been chosen, and a way out of it. Without this a guest who has
+             scrolled to another month has no idea what they are holding. --}}
+        @if ($dates !== [])
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-sand-200 pt-3">
+                <p class="text-xs font-medium text-brand-900">
+                    {{ trans_choice('{1} :count day chosen|[2,*] :count days chosen', count($dates), ['count' => count($dates)]) }}
+                </p>
+
+                <flux:button type="button" variant="subtle" size="xs" wire:click="clearDates">
+                    {{ __('Clear dates') }}
+                </flux:button>
+            </div>
+        @endif
+
         {{-- Legend --}}
         <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-sand-200 pt-3 text-[11px] text-brand-800/60">
+            <span class="flex items-center gap-1.5">
+                <span class="size-2.5 bg-brand-800"></span>
+                {{ __('Chosen') }}
+            </span>
             <span class="flex items-center gap-1.5">
                 <span class="size-1.5 rounded-full bg-gold-500"></span>
                 {{ __('Partly booked') }}

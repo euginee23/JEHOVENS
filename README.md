@@ -296,6 +296,98 @@ three behind its tabs.
 
 ---
 
+## Payments
+
+Bookings are paid for through **PayMongo Checkout** — GCash, Maya, GrabPay and cards. The
+guest fills in the booking form, the booking is written, and they are sent to PayMongo to
+pay. PayMongo reports the payment back to a webhook, which confirms the booking, records
+the payment reference and emails the guest.
+
+```dotenv
+PAYMONGO_SECRET_KEY=sk_test_...
+PAYMONGO_PUBLIC_KEY=pk_test_...
+PAYMONGO_WEBHOOK_SECRET=whsk_...
+PAYMONGO_HOLD_MINUTES=60
+```
+
+**Without a secret key the booking pages refuse to take a booking** and say so, rather than
+recording one nobody paid for.
+
+**Registering the webhook.** The signing secret is not in the dashboard — it comes back
+once, in the response to creating the webhook, so save it there and then:
+
+```bash
+curl https://api.paymongo.com/v1/webhooks \
+  -u sk_test_your_key: \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"attributes":{
+        "url":"https://your-domain.com/webhooks/paymongo",
+        "events":["checkout_session.payment.paid","payment.failed"]}}}'
+```
+
+The `secret_key` in the response is `PAYMONGO_WEBHOOK_SECRET`. Deliveries that are not
+signed with it are rejected — the endpoint is public, so this is what stops anyone who
+finds the URL confirming bookings for free.
+
+**A booking holds its dates from the moment the guest is sent to PayMongo**, which is what
+stops two people paying for the same slot. A guest who closes the tab would otherwise hold
+those dates for ever, so the scheduler must be running:
+
+```bash
+* * * * * cd /path/to/app && php artisan schedule:run >> /dev/null 2>&1
+```
+
+That runs `resort:expire-unpaid-reservations` every five minutes, which cancels unpaid
+bookings past their hold and puts the dates back on sale. **Without it, abandoned
+checkouts keep their dates permanently.** You can run it by hand to check:
+
+```bash
+php artisan resort:expire-unpaid-reservations
+```
+
+---
+
+## Email and background jobs
+
+Every booking email — the guest's receipt, the resort's new-booking alert, and one for
+each status change and settled balance — goes through `App\Notifications\ReservationNotification`.
+Two things have to be true for a guest to actually receive one.
+
+**1. A real mailer.** `MAIL_MAILER` defaults to `log`, which writes the message into
+`storage/logs/laravel.log` and sends nothing. For a server that should really deliver, set
+these in `.env`:
+
+```dotenv
+MAIL_MAILER=smtp
+MAIL_SCHEME=smtp
+MAIL_HOST=smtp.your-provider.com
+MAIL_PORT=587
+MAIL_USERNAME=
+MAIL_PASSWORD=
+MAIL_FROM_ADDRESS="bookings@your-domain.com"
+MAIL_FROM_NAME="${APP_NAME}"
+
+# Where new-booking alerts land. Falls back to ADMIN_EMAIL when left blank.
+RESORT_NOTIFICATION_EMAIL=bookings@your-domain.com
+```
+
+`MAIL_FROM_ADDRESS` must be an address your provider is allowed to send as, or the mail
+will be accepted and then silently dropped.
+
+**2. A running queue worker.** The notifications are queued, and `QUEUE_CONNECTION` is
+`database`, so without a worker they pile up in the `jobs` table and **nothing is ever
+sent**. `composer dev` starts one for you locally. On a server, run it under supervisor or
+systemd so it restarts on failure:
+
+```bash
+php artisan queue:work --tries=3 --timeout=60
+```
+
+Restart the worker after every deploy (`php artisan queue:restart`) — workers hold the old
+code in memory. Check `php artisan queue:failed` if a guest reports a missing email.
+
+---
+
 ## Troubleshooting
 
 **`Unable to locate file in Vite manifest`**

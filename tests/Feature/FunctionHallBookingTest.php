@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\BookingStatus;
+use App\Enums\PaymentStatus;
 use App\Models\Booking;
 use App\Models\Hall;
 use App\Models\User;
@@ -16,8 +17,7 @@ function bookingInput(Hall $hall, array $overrides = []): array
 {
     return array_merge([
         'hall_id' => $hall->id,
-        'start_date' => now()->addWeek()->toDateString(),
-        'end_date' => now()->addWeek()->toDateString(),
+        'dates' => [now()->addWeek()->toDateString()],
         'start_hour' => 8,
         'end_hour' => 12,
         'include_skirting' => true,
@@ -42,6 +42,8 @@ function fillBooking(Hall $hall, array $overrides = []): Testable
 }
 
 beforeEach(function () {
+    fakePayMongo();
+
     $this->hall = Hall::factory()->create([
         'name' => 'Grand Ballroom',
         'rent_price' => 8000,
@@ -100,11 +102,10 @@ test('a multi-day quote charges rent and skirting for every day', function () {
 });
 
 test('a booking can run across several days', function () {
-    $start = now()->addWeek()->toDateString();
-    $end = now()->addWeek()->addDays(2)->toDateString();
+    $days = collect(range(0, 2))->map(fn (int $i) => now()->addWeek()->addDays($i)->toDateString())->all();
 
-    fillBooking($this->hall, ['start_date' => $start, 'end_date' => $end])
-        ->call('confirmPayment')
+    fillBooking($this->hall, ['dates' => $days])
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     $booking = Booking::sole();
@@ -116,17 +117,50 @@ test('a booking can run across several days', function () {
         ->skirting_total->toBe(15_000)
         ->total->toBe(39_000);
 
-    expect($booking->start_date->toDateString())->toBe($start)
-        ->and($booking->end_date->toDateString())->toBe($end);
+    expect($booking->dateList())->toBe($days)
+        ->and($booking->start_date->toDateString())->toBe($days[0])
+        ->and($booking->end_date->toDateString())->toBe($days[2]);
 });
 
-test('the last day cannot come before the first', function () {
-    fillBooking($this->hall, [
-        'start_date' => now()->addWeek()->toDateString(),
-        'end_date' => now()->addDays(2)->toDateString(),
-    ])
+/**
+ * The headline change: days are taken one at a time, so a guest running an event on three
+ * separate Saturdays pays for three days rather than the whole three weeks between them.
+ */
+test('a booking can cover days that are not consecutive', function () {
+    $days = [
+        now()->addWeek()->toDateString(),
+        now()->addWeeks(2)->toDateString(),
+        now()->addWeeks(3)->toDateString(),
+    ];
+
+    fillBooking($this->hall, ['dates' => $days])
         ->call('proceedToPayment')
-        ->assertHasErrors(['end_date' => 'after_or_equal']);
+        ->assertHasNoErrors();
+
+    $booking = Booking::sole();
+
+    expect($booking->days)->toBe(3)
+        ->and($booking->dateList())->toBe($days)
+        ->and($booking->rent_total)->toBe(24_000)   // three days, not fifteen
+        ->and($booking->dates()->count())->toBe(3)
+        ->and($booking->start_date->toDateString())->toBe($days[0])
+        ->and($booking->end_date->toDateString())->toBe($days[2]);
+});
+
+test('a booking with no dates at all is refused', function () {
+    fillBooking($this->hall, ['dates' => []])
+        ->call('proceedToPayment')
+        ->assertHasErrors(['dates' => 'required']);
+
+    expect(Booking::count())->toBe(0);
+});
+
+test('a booking cannot cover more days than the limit', function () {
+    $tooMany = collect(range(0, 30))->map(fn (int $i) => now()->addDays($i + 1)->toDateString())->all();
+
+    fillBooking($this->hall, ['dates' => $tooMany])
+        ->call('proceedToPayment')
+        ->assertHasErrors(['dates' => 'max']);
 
     expect(Booking::count())->toBe(0);
 });
@@ -140,17 +174,37 @@ test('a multi-day booking clashes with anything overlapping any of its days', fu
         'end_hour' => 12,
     ]);
 
-    // The range straddles the taken day, on the same hours.
+    // The selection includes the taken day, on the same hours.
     fillBooking($this->hall, [
-        'start_date' => now()->addWeek()->toDateString(),
-        'end_date' => now()->addWeek()->addDays(2)->toDateString(),
+        'dates' => collect(range(0, 2))->map(fn (int $i) => now()->addWeek()->addDays($i)->toDateString())->all(),
         'start_hour' => 8,
         'end_hour' => 12,
     ])
         ->call('proceedToPayment')
-        ->assertHasErrors('start_date');
+        ->assertHasErrors('dates');
 
     expect(Booking::count())->toBe(1);
+});
+
+// The point of taking days one at a time: the guest simply leaves the busy day out.
+test('a selection that steps over a taken day is allowed', function () {
+    $taken = now()->addWeek()->addDay()->toDateString();
+
+    Booking::factory()->for($this->hall)->create([
+        'start_date' => $taken,
+        'start_hour' => 8,
+        'end_hour' => 12,
+    ]);
+
+    fillBooking($this->hall, [
+        'dates' => [now()->addWeek()->toDateString(), now()->addWeek()->addDays(2)->toDateString()],
+        'start_hour' => 8,
+        'end_hour' => 12,
+    ])
+        ->call('proceedToPayment')
+        ->assertHasNoErrors();
+
+    expect(Booking::count())->toBe(2);
 });
 
 test('a multi-day booking on different hours does not clash', function () {
@@ -161,45 +215,61 @@ test('a multi-day booking on different hours does not clash', function () {
     ]);
 
     fillBooking($this->hall, [
-        'start_date' => now()->addWeek()->toDateString(),
-        'end_date' => now()->addWeek()->addDays(2)->toDateString(),
+        'dates' => collect(range(0, 2))->map(fn (int $i) => now()->addWeek()->addDays($i)->toDateString())->all(),
         'start_hour' => 12,
         'end_hour' => 16,
     ])
-        ->call('confirmPayment')
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(Booking::count())->toBe(2);
 });
 
-test('picking a date on the calendar starts a single-day booking, and a later one extends it', function () {
-    $first = now()->addWeek()->toDateString();
-    $later = now()->addWeek()->addDays(2)->toDateString();
+// Without this a guest who mis-taps is stuck with a highlighted day they never wanted,
+// which is the complaint that prompted the change.
+test('tapping a date adds it and tapping it again removes it', function () {
+    $date = now()->addWeek()->toDateString();
 
     Livewire::test('pages::booking.function-hall')
-        ->call('selectDate', $first)
-        ->assertSet('start_date', $first)
-        ->assertSet('end_date', $first)
-        ->call('selectDate', $later)
-        ->assertSet('start_date', $first)
-        ->assertSet('end_date', $later);
+        ->call('toggleDate', $date)
+        ->assertSet('dates', [$date])
+        ->call('toggleDate', $date)
+        ->assertSet('dates', []);
 });
 
-test('picking an earlier date on the calendar starts the range over', function () {
-    $first = now()->addWeek()->toDateString();
-    $earlier = now()->addDays(2)->toDateString();
+test('dates are kept in calendar order however they are tapped', function () {
+    $earlier = now()->addWeek()->toDateString();
+    $later = now()->addWeeks(2)->toDateString();
 
     Livewire::test('pages::booking.function-hall')
-        ->call('selectDate', $first)
-        ->call('selectDate', $earlier)
-        ->assertSet('start_date', $earlier)
-        ->assertSet('end_date', $earlier);
+        ->call('toggleDate', $later)
+        ->call('toggleDate', $earlier)
+        ->assertSet('dates', [$earlier, $later]);
+});
+
+test('clearing the dates empties the calendar', function () {
+    Livewire::test('pages::booking.function-hall')
+        ->call('toggleDate', now()->addWeek()->toDateString())
+        ->call('toggleDate', now()->addWeeks(2)->toDateString())
+        ->assertCount('dates', 2)
+        ->call('clearDates')
+        ->assertSet('dates', []);
 });
 
 test('the calendar refuses a date in the past', function () {
     Livewire::test('pages::booking.function-hall')
-        ->call('selectDate', now()->subDay()->toDateString())
-        ->assertSet('start_date', '');
+        ->call('toggleDate', now()->subDay()->toDateString())
+        ->assertSet('dates', []);
+});
+
+test('the calendar stops taking dates at the limit', function () {
+    $component = Livewire::test('pages::booking.function-hall');
+
+    foreach (range(0, 30) as $offset) {
+        $component->call('toggleDate', now()->addDays($offset + 1)->toDateString());
+    }
+
+    $component->assertCount('dates', 30);
 });
 
 test('the live price summary follows the form', function () {
@@ -214,11 +284,7 @@ test('a guest can book a hall without an account', function () {
     fillBooking($this->hall)
         ->call('proceedToPayment')
         ->assertHasNoErrors()
-        ->assertSet('showPayment', true)
-        ->call('confirmPayment')
-        ->assertHasNoErrors()
-        ->assertSet('showPayment', false)
-        ->assertSee('Booking received');
+        ->assertRedirect(FAKE_CHECKOUT_URL);
 
     $booking = Booking::sole();
 
@@ -231,7 +297,11 @@ test('a guest can book a hall without an account', function () {
         ->downpayment->toBe(6_500)
         ->balance->toBe(6_500)
         ->status->toBe(BookingStatus::Pending)
-        ->and($booking->reference)->toStartWith('JGR-');
+        ->and($booking->reference)->toStartWith('JGR-')
+        // Written before the redirect, which is what holds the dates while they pay.
+        ->and($booking->payment_status)->toBe(PaymentStatus::Awaiting)
+        ->and($booking->payment_session_id)->toBe('cs_test_fake')
+        ->and($booking->payment_expires_at)->not->toBeNull();
 });
 
 test('a signed-in guest has their booking linked to their account', function () {
@@ -243,7 +313,7 @@ test('a signed-in guest has their booking linked to their account', function () 
         ->assertSet('guest_name', 'Maria Santos')
         ->assertSet('guest_email', 'maria@example.com');
 
-    fillBooking($this->hall)->call('confirmPayment')->assertHasNoErrors();
+    fillBooking($this->hall)->call('proceedToPayment')->assertHasNoErrors();
 
     expect(Booking::sole()->user_id)->toBe($user->id);
 });
@@ -256,19 +326,31 @@ test('a hall must be chosen', function () {
 
 test('the booking date cannot be in the past', function () {
     fillBooking($this->hall, [
-        'start_date' => now()->subDay()->toDateString(),
-        'end_date' => now()->subDay()->toDateString(),
+        'dates' => [now()->subDay()->toDateString()],
     ])
         ->call('proceedToPayment')
-        ->assertHasErrors(['start_date' => 'after_or_equal']);
+        ->assertHasErrors('dates');
 });
 
-test('the stay must be a whole number of four-hour blocks', function () {
-    fillBooking($this->hall, ['start_hour' => 8, 'end_hour' => 14])
+test('a booking shorter than the minimum is refused', function () {
+    fillBooking($this->hall, ['start_hour' => 8, 'end_hour' => 10])
         ->call('proceedToPayment')
         ->assertHasErrors('end_hour');
 
     expect(Booking::count())->toBe(0);
+});
+
+// The old form only offered whole blocks, so a 7:00 AM to 12:00 PM event — the most
+// commonly asked-for morning slot — could not be booked at all.
+test('a booking of any whole number of hours over the minimum is allowed', function () {
+    fillBooking($this->hall, ['start_hour' => 7, 'end_hour' => 12])
+        ->call('proceedToPayment')
+        ->assertHasNoErrors();
+
+    expect(Booking::sole())
+        ->hours->toBe(5)
+        ->rent_total->toBe(16_000)   // five hours runs into a second block, billed whole
+        ->total->toBe(21_000);
 });
 
 test('the end time must be after the start time', function () {
@@ -298,9 +380,9 @@ test('a hall cannot be double-booked for an overlapping slot', function () {
         'end_hour' => 12,
     ]);
 
-    fillBooking($this->hall, ['start_date' => $date, 'end_date' => $date, 'start_hour' => 8, 'end_hour' => 12])
+    fillBooking($this->hall, ['dates' => [$date], 'start_hour' => 8, 'end_hour' => 12])
         ->call('proceedToPayment')
-        ->assertHasErrors('start_date');
+        ->assertHasErrors('dates');
 
     expect(Booking::count())->toBe(1);
 });
@@ -314,8 +396,8 @@ test('a cancelled booking frees its slot again', function () {
         'end_hour' => 12,
     ]);
 
-    fillBooking($this->hall, ['start_date' => $date, 'end_date' => $date, 'start_hour' => 8, 'end_hour' => 12])
-        ->call('confirmPayment')
+    fillBooking($this->hall, ['dates' => [$date], 'start_hour' => 8, 'end_hour' => 12])
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(Booking::where('status', BookingStatus::Pending)->count())->toBe(1);
@@ -330,8 +412,8 @@ test('a non-overlapping slot on the same day is allowed', function () {
         'end_hour' => 12,
     ]);
 
-    fillBooking($this->hall, ['start_date' => $date, 'end_date' => $date, 'start_hour' => 12, 'end_hour' => 16])
-        ->call('confirmPayment')
+    fillBooking($this->hall, ['dates' => [$date], 'start_hour' => 12, 'end_hour' => 16])
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(Booking::count())->toBe(2);

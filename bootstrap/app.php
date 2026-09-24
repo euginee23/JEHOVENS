@@ -12,7 +12,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // PayMongo posts here from its own servers and has no session to carry a CSRF
+        // token. It proves who it is by signing the request instead, which
+        // PayMongoWebhookController checks before believing a word of it.
+        $middleware->validateCsrfTokens(except: [
+            'webhooks/paymongo',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

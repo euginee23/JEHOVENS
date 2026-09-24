@@ -32,5 +32,11 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Fake credentials, so the booking pages believe payments are set up. Every
+             outgoing call is faked with Http::fake(); nothing reaches PayMongo. -->
+        <env name="PAYMONGO_SECRET_KEY" value="sk_test_fake"/>
+        <env name="PAYMONGO_PUBLIC_KEY" value="pk_test_fake"/>
+        <env name="PAYMONGO_WEBHOOK_SECRET" value="whsk_test_fake"/>
+        <env name="PAYMONGO_BASE_URL" value="https://api.paymongo.com/v1"/>
     </php>
 </phpunit>

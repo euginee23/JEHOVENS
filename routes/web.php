@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\PaymentReturnController;
+use App\Http\Controllers\PayMongoWebhookController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -13,6 +15,29 @@ Route::view('/', 'pages::marketing.home')->name('home');
 Route::livewire('book/function-hall', 'pages::booking.function-hall')->name('booking.function-hall');
 Route::livewire('book/rooms', 'pages::booking.rooms')->name('booking.rooms');
 Route::livewire('book/catering', 'pages::booking.catering')->name('booking.catering');
+
+/*
+|--------------------------------------------------------------------------
+| Payments
+|--------------------------------------------------------------------------
+|
+| Guests are sent to PayMongo to pay and come back to one of the two signed
+| routes below. Signed, because a booking reference is six characters and an
+| open cancel URL would let a stranger release someone else's dates.
+|
+| The webhook is where PayMongo itself reports a payment, and is the path
+| that actually confirms a booking — the guest's return is only a nicety for
+| when the webhook is slow. It verifies its own signature, so it sits outside
+| both the auth group and CSRF (see bootstrap/app.php).
+|
+*/
+
+Route::middleware('signed')->group(function () {
+    Route::get('payment/return/{type}/{reference}', [PaymentReturnController::class, 'success'])->name('payment.return');
+    Route::get('payment/cancel/{type}/{reference}', [PaymentReturnController::class, 'cancel'])->name('payment.cancel');
+});
+
+Route::post('webhooks/paymongo', PayMongoWebhookController::class)->name('webhooks.paymongo');
 
 /*
 |--------------------------------------------------------------------------

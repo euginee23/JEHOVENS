@@ -3,30 +3,36 @@
 namespace App\Notifications;
 
 /**
- * The receipt a guest gets the moment they submit a booking.
+ * The receipt a guest gets once their payment has gone through.
  *
- * The reference used to be shown once on screen and lost on refresh, so this is the only
- * lasting record the guest has of what they booked.
+ * Sent after PayMongo confirms the money, not when the form is submitted: under the old
+ * honour-system GCash flow a booking existed before anyone had checked a payment, and
+ * this email had to hedge. It no longer does — by the time it is sent the booking is paid
+ * for and confirmed.
  */
 class ReservationReceived extends ReservationNotification
 {
     protected function subject(): string
     {
-        return __('We have your booking — :reference', ['reference' => $this->reservation->reference]);
+        return __('Your booking is confirmed — :reference', ['reference' => $this->reservation->reference]);
     }
 
     protected function heading(): string
     {
-        return __('Thanks, :name — we have your booking', ['name' => $this->reservation->guestName]);
+        return __('Thanks, :name — you are booked in', ['name' => $this->reservation->guestName]);
     }
 
     protected function intro(): string
     {
-        return __('We are verifying your payment now. You will get another email from us once it clears, usually within 24 hours. Keep your reference handy in the meantime.');
+        return __('We have received your payment of ₱:paid and your booking is confirmed. Your payment reference is below — keep this email, and quote your booking reference when you arrive.', [
+            'paid' => number_format($this->reservation->paid),
+        ]);
     }
 
-    protected function outro(): string
+    protected function outro(): ?string
     {
-        return __('Nothing is confirmed until you hear from us again, so please hold on to this email.');
+        return $this->reservation->balance >= 1
+            ? (string) __('Please settle the remaining ₱:balance on arrival.', ['balance' => number_format($this->reservation->balance)])
+            : null;
     }
 }

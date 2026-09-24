@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /*
@@ -44,7 +45,50 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * The URL a faked checkout session sends guests to.
+ */
+const FAKE_CHECKOUT_URL = 'https://checkout.paymongo.com/cs_test_fake';
+
+/**
+ * Stand in for PayMongo, so no test ever reaches the real gateway.
+ *
+ * `preventStrayRequests()` is the important half: a call this forgets to fake fails the
+ * test loudly rather than quietly trying to reach the internet from CI.
+ */
+function fakePayMongo(bool $paid = false, int $paidAmount = 0): void
 {
-    // ..
+    Http::preventStrayRequests();
+
+    Http::fake([
+        '*/checkout_sessions*' => Http::response(
+            ['data' => fakeCheckoutSession($paid, $paidAmount)],
+        ),
+    ]);
+}
+
+/**
+ * One checkout session as PayMongo describes it, paid or not.
+ *
+ * @return array<string, mixed>
+ */
+function fakeCheckoutSession(bool $paid = false, int $paidAmount = 0): array
+{
+    return [
+        'id' => 'cs_test_fake',
+        'attributes' => [
+            'checkout_url' => FAKE_CHECKOUT_URL,
+            'reference_number' => 'JGR-TEST',
+            'payment_intent' => ['id' => 'pi_test_fake'],
+            'payments' => $paid ? [[
+                'id' => 'pay_test_fake',
+                'attributes' => [
+                    'status' => 'paid',
+                    // PayMongo counts in centavos.
+                    'amount' => $paidAmount * 100,
+                    'source' => ['type' => 'gcash'],
+                ],
+            ]] : [],
+        ],
+    ];
 }

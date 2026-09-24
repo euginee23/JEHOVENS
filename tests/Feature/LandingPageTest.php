@@ -139,6 +139,23 @@ test('the hero carries an availability search that lands on the room booking pag
         ->and($room->rates)->toHaveCount(2);
 });
 
+/**
+ * The guest picks their own arrival and duration. A pre-selected time carried through to
+ * the booking form as a value they never chose, which is what the resort asked us to stop.
+ */
+test('the availability search pre-selects no date, arrival or duration', function () {
+    Room::factory()->withRates([6 => 1200, 24 => 2500])->create();
+
+    $html = $this->get(route('home'))->getContent();
+    $form = str($html)->after('<form method="GET"')->before('</form>')->toString();
+
+    expect($form)->not->toContain('value="'.today()->toDateString().'"')
+        ->and($form)->not->toContain('selected>'.__('24 hours (overnight)'))
+        ->and(substr_count($form, 'selected'))->toBe(2)   // the two blank placeholders
+        ->and($form)->toContain(__('Select time'))
+        ->and($form)->toContain(__('Select duration'));
+});
+
 test('the duration field is dropped rather than rendered empty when no rates exist', function () {
     $html = $this->get(route('home'))->getContent();
 

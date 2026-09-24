@@ -128,7 +128,10 @@ test('an admin confirms a pending booking', function () {
 });
 
 test('completing a booking records the balance as settled', function () {
-    $booking = Booking::factory()->for($this->hall)->confirmed()->create();
+    // Finished, because completing a booking now puts its day back on sale.
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create([
+        'start_date' => today()->subWeek()->toDateString(),
+    ]);
 
     expect($booking->balance)->toBeGreaterThan(0)
         ->and($booking->balance_settled_at)->toBeNull();
@@ -153,12 +156,48 @@ test('an invalid status move is refused instead of throwing', function () {
     expect($booking->refresh()->status)->toBe(BookingStatus::Pending);
 });
 
-test('a completed booking cannot be moved anywhere else', function () {
+test('a completed booking can only be walked back to confirmed', function () {
     $booking = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
 
-    foreach (['pending', 'confirmed', 'cancelled'] as $target) {
+    foreach (['pending', 'cancelled'] as $target) {
         Livewire::test('pages::admin.bookings')->call('moveTo', $booking->id, $target);
     }
+
+    expect($booking->refresh()->status)->toBe(BookingStatus::Completed);
+
+    // Completing a booking releases its days, so an early click has to be undoable.
+    Livewire::test('pages::admin.bookings')->call('moveTo', $booking->id, 'confirmed');
+
+    expect($booking->refresh()->status)->toBe(BookingStatus::Confirmed);
+});
+
+/**
+ * The resort marks a booking completed once the guests have gone and expects the day to
+ * go back on sale. Allowing it any earlier would sell the hall out from under an event
+ * that is still running.
+ */
+test('a booking cannot be completed before the event is over', function () {
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create([
+        'start_date' => today()->addWeek()->toDateString(),
+    ]);
+
+    Livewire::test('pages::admin.bookings')
+        ->call('moveTo', $booking->id, 'completed')
+        ->assertOk();
+
+    expect($booking->refresh()->status)->toBe(BookingStatus::Confirmed);
+});
+
+test('a booking can be completed once its closing hour has passed', function () {
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create([
+        'start_date' => today()->toDateString(),
+        'start_hour' => 8,
+        'end_hour' => 12,
+    ]);
+
+    $this->travelTo(today()->setTime(13, 0));
+
+    Livewire::test('pages::admin.bookings')->call('moveTo', $booking->id, 'completed');
 
     expect($booking->refresh()->status)->toBe(BookingStatus::Completed);
 });
@@ -204,10 +243,14 @@ test('cancelling frees the slot for a new booking', function () {
     expect(Booking::query()->blocking()->count())->toBe(0);
 });
 
-test('a completed booking still blocks its slot from being rebooked', function () {
+/**
+ * The resort's own example: Room A is booked for September 9, the guests use it, an admin
+ * marks it completed — and September 9 has to be sellable again the same day.
+ */
+test('a completed booking frees its slot for a new one', function () {
     Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
 
-    expect(Booking::query()->blocking()->count())->toBe(1);
+    expect(Booking::query()->blocking()->count())->toBe(0);
 });
 
 test('outstanding money excludes settled and cancelled bookings', function () {
@@ -291,7 +334,11 @@ test('confirming works on a room booking', function () {
 
 test('completing a room booking settles its balance', function () {
     $room = Room::factory()->withRates()->create();
-    $booking = RoomBooking::factory()->for($room)->confirmed()->create();
+    // Checked out already, because completing a stay now puts its days back on sale.
+    $booking = RoomBooking::factory()->for($room)->confirmed()->create([
+        'starts_at' => now()->subWeek()->setTime(14, 0),
+        'ends_at' => now()->subWeek()->setTime(20, 0),
+    ]);
 
     expect($booking->balance)->toBeGreaterThan(0);
 
@@ -404,7 +451,10 @@ test('catering orders can be filtered by package and event date', function () {
 
 test('confirming and completing works on a catering order', function () {
     $package = CateringPackage::factory()->create();
-    $order = CateringOrder::factory()->for($package, 'package')->create(['status' => BookingStatus::Pending]);
+    $order = CateringOrder::factory()->for($package, 'package')->create([
+        'status' => BookingStatus::Pending,
+        'start_date' => today()->subWeek()->toDateString(),
+    ]);
 
     $page = Livewire::test('pages::admin.bookings')->call('showType', 'catering');
 

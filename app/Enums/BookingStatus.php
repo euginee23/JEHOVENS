@@ -2,6 +2,8 @@
 
 namespace App\Enums;
 
+use App\Models\Concerns\ManagesReservationLifecycle;
+
 enum BookingStatus: string
 {
     case Pending = 'pending';
@@ -49,20 +51,26 @@ enum BookingStatus: string
     }
 
     /**
-     * Statuses that still hold the hall for the requested slot.
+     * Statuses that still hold the venue for the days booked.
      *
-     * Completed stays here: a finished event still occupied its slot, so it must keep
-     * blocking that time from being double-booked after the fact.
+     * Completed is deliberately absent. The resort marks a booking completed once the
+     * guests have gone, and expects those days to go back on sale — holding a finished
+     * event's days against a new booking serves nobody. Nothing is freed early: a
+     * reservation can only be completed once its last day has arrived, which
+     * {@see ManagesReservationLifecycle::transitionTo()} enforces.
      *
      * @return array<int, self>
      */
     public static function blocking(): array
     {
-        return [self::Pending, self::Confirmed, self::Completed];
+        return [self::Pending, self::Confirmed];
     }
 
     /**
      * Statuses an admin may move this booking to.
+     *
+     * Completed can be walked back to Confirmed, which matters far more now that
+     * completing a booking puts its days back on sale.
      *
      * @return array<int, self>
      */
@@ -71,7 +79,7 @@ enum BookingStatus: string
         return match ($this) {
             self::Pending => [self::Confirmed, self::Cancelled],
             self::Confirmed => [self::Completed, self::Cancelled],
-            self::Completed => [],
+            self::Completed => [self::Confirmed],
             self::Cancelled => [self::Pending],
         };
     }

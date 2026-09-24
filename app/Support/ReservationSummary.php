@@ -23,6 +23,9 @@ use InvalidArgumentException;
  */
 readonly class ReservationSummary
 {
+    /**
+     * @param  array<int, string>  $dates  the days this reservation covers, as ISO strings
+     */
     public function __construct(
         public string $type,
         public string $reference,
@@ -31,12 +34,23 @@ readonly class ReservationSummary
         public string $detail,
         public CarbonInterface $occursAt,
         public string $occursAtLabel,
+        public array $dates,
+        public int $days,
         public int $total,
         public int $paid,
         public int $balance,
         public BookingStatus $status,
         public CarbonInterface $placedAt,
     ) {}
+
+    /**
+     * Whether the days covered have gaps in them, which a guest reading a range of dates
+     * would otherwise take to mean everything in between is theirs.
+     */
+    public function hasGaps(): bool
+    {
+        return count($this->dates) > 1 && ! DateList::isContiguous($this->dates);
+    }
 
     /**
      * Build a summary from whichever of the three reservation types this is.
@@ -64,6 +78,7 @@ readonly class ReservationSummary
         $startsAt = $booking->start_date->copy()->setTime($booking->start_hour, 0);
 
         $hours = self::hour($booking->start_hour).'–'.self::hour($booking->end_hour);
+        $dates = $booking->dateList();
 
         return new self(
             type: __('Function hall'),
@@ -72,8 +87,10 @@ readonly class ReservationSummary
             guestEmail: $booking->guest_email,
             detail: $booking->hall->name,
             occursAt: $startsAt,
-            occursAtLabel: DateRange::shortLabel($booking->start_date, $booking->end_date).' · '
+            occursAtLabel: DateList::shortLabel($dates).' · '
                 .($booking->days > 1 ? __(':hours each day', ['hours' => $hours]) : $hours),
+            dates: $dates,
+            days: $booking->days,
             total: $booking->total,
             paid: $booking->downpayment,
             balance: $booking->balance,
@@ -87,6 +104,9 @@ readonly class ReservationSummary
      */
     public static function fromRoomBooking(RoomBooking $booking): self
     {
+        $dates = $booking->dateList();
+        $hours = trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours]);
+
         return new self(
             type: __('Room'),
             reference: $booking->reference,
@@ -94,10 +114,16 @@ readonly class ReservationSummary
             guestEmail: $booking->guest_email,
             detail: $booking->room->name,
             occursAt: $booking->starts_at,
-            occursAtLabel: $booking->isOvernight()
-                ? DateRange::shortLabel($booking->starts_at, $booking->ends_at).' · '.$booking->stayLabel()
-                : $booking->starts_at->format('M j, Y · g:i A').' · '
-                    .trans_choice('{1} :count hour|[2,*] :count hours', $booking->hours, ['count' => $booking->hours]),
+            // An overnight stay is written check-in to check-out, which is the span the
+            // guest recognises — the room is theirs for the nights between the two.
+            occursAtLabel: match (true) {
+                $booking->isOvernight() => DateRange::shortLabel($booking->starts_at, $booking->ends_at).' · '.$booking->stayLabel(),
+                $booking->days > 1 => DateList::shortLabel($dates).' · '.$booking->starts_at->format('g:i A').' · '
+                    .__(':hours each day', ['hours' => $hours]),
+                default => $booking->starts_at->format('M j, Y · g:i A').' · '.$hours,
+            },
+            dates: $dates,
+            days: $booking->days,
             total: $booking->total,
             paid: $booking->amount_paid,
             balance: $booking->balance,
@@ -112,6 +138,7 @@ readonly class ReservationSummary
     public static function fromCateringOrder(CateringOrder $order): self
     {
         $guests = trans_choice('{1} :count guest|[2,*] :count guests', $order->guests, ['count' => number_format($order->guests)]);
+        $dates = $order->dateList();
 
         return new self(
             type: __('Catering'),
@@ -120,8 +147,10 @@ readonly class ReservationSummary
             guestEmail: $order->guest_email,
             detail: $order->package->name,
             occursAt: $order->start_date,
-            occursAtLabel: DateRange::shortLabel($order->start_date, $order->end_date).' · '
+            occursAtLabel: DateList::shortLabel($dates).' · '
                 .($order->days > 1 ? __(':guests each day', ['guests' => $guests]) : $guests),
+            dates: $dates,
+            days: $order->days,
             total: $order->total,
             paid: $order->downpayment,
             balance: $order->balance,

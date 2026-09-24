@@ -171,7 +171,7 @@ class extends Component {
         $model = $this->model();
 
         return $model::query()
-            ->with($this->venueRelation())
+            ->with([$this->venueRelation(), 'dates'])
             ->when($this->search !== '', function (Builder $query) {
                 $term = '%'.$this->search.'%';
 
@@ -256,7 +256,7 @@ class extends Component {
 
         $model = $this->model();
 
-        return $model::with($this->venueRelation())->find($this->viewing);
+        return $model::with([$this->venueRelation(), 'dates'])->find($this->viewing);
     }
 
     /**
@@ -281,10 +281,16 @@ class extends Component {
         $target = BookingStatus::from($status);
 
         if (! $booking->transitionTo($target)) {
-            Flux::toast(variant: 'warning', text: __('A :from booking cannot be marked :to.', [
-                'from' => strtolower($booking->status->shortLabel()),
-                'to' => strtolower($target->shortLabel()),
-            ]));
+            // The move the buttons offer but the lifecycle still refuses is completing a
+            // booking early, so say why rather than leaving staff to guess.
+            $reason = $target === BookingStatus::Completed && ! $booking->hasFinished()
+                ? __('You can mark this completed once the booking has finished — completing it frees those dates for someone else.')
+                : __('A :from booking cannot be marked :to.', [
+                    'from' => strtolower($booking->status->shortLabel()),
+                    'to' => strtolower($target->shortLabel()),
+                ]);
+
+            Flux::toast(variant: 'warning', text: $reason);
 
             return;
         }
@@ -501,7 +507,7 @@ class extends Component {
                                     {{-- Catering has no `hours` column; it is priced per head. --}}
                                     <span class="block text-xs text-zinc-500">
                                         @if ($this->showingCatering())
-                                            {{ \App\Support\DateRange::shortLabel($row->start_date, $row->end_date) }}
+                                            {{ \App\Support\DateList::shortLabel($row->dateList()) }}
                                             · {{ trans_choice('{1} :count guest|[2,*] :count guests', $row->guests, ['count' => number_format($row->guests)]) }}
                                             @if ($row->days > 1)
                                                 · {{ trans_choice('{1} :count day|[2,*] :count days', $row->days, ['count' => $row->days]) }}
@@ -510,7 +516,7 @@ class extends Component {
                                             {{ $row->starts_at->format('M j, Y · g:i A') }}
                                             · {{ $row->stayLabel() }}
                                         @else
-                                            {{ \App\Support\DateRange::shortLabel($row->start_date, $row->end_date) }}
+                                            {{ \App\Support\DateList::shortLabel($row->dateList()) }}
                                             · {{ trans_choice('{1} :count hour|[2,*] :count hours', $row->hours, ['count' => $row->hours]) }}
                                             @if ($row->days > 1)
                                                 · {{ trans_choice('{1} :count day|[2,*] :count days', $row->days, ['count' => $row->days]) }}
@@ -595,14 +601,14 @@ class extends Component {
                         __('Arrive by') => $b->arriveBy()->format('g:i A'),
                     ],
                     $isCatering => [
-                        trans_choice('{1} Event date|[2,*] Event dates', $b->days) => \App\Support\DateRange::label($b->start_date, $b->end_date),
+                        trans_choice('{1} Event date|[2,*] Event dates', $b->days) => \App\Support\DateList::label($b->dateList()),
                         __('Days') => number_format($b->days),
                         $b->days > 1 ? __('Guests per day') : __('Guests') => number_format($b->guests),
                         __('Per head') => '₱'.number_format($b->price_per_head),
                         __('Skirting') => $b->include_skirting ? __('Included') : __('Not included'),
                     ],
                     default => [
-                        trans_choice('{1} Date|[2,*] Dates', $b->days) => \App\Support\DateRange::label($b->start_date, $b->end_date),
+                        trans_choice('{1} Date|[2,*] Dates', $b->days) => \App\Support\DateList::label($b->dateList()),
                         __('Days') => number_format($b->days),
                         $b->days > 1 ? __('Time each day') : __('Time') => sprintf('%d:00 %s – %d:00 %s', $b->start_hour % 12 ?: 12, $b->start_hour >= 12 ? 'PM' : 'AM', $b->end_hour % 12 ?: 12, $b->end_hour >= 12 ? 'PM' : 'AM'),
                     ],
@@ -621,6 +627,11 @@ class extends Component {
                             ? __('Settled :date', ['date' => $b->balance_settled_at->format('M j, Y')])
                             : '₱'.number_format($b->balance)),
                     __('Booked on') => $b->created_at->format('M j, Y g:i A'),
+                    // What a guest quotes when they ring up about a payment, and what the
+                    // resort checks against its PayMongo dashboard.
+                    __('Payment') => $b->payment_status->label()
+                        .($b->payment_method ? ' · '.strtoupper($b->payment_method) : ''),
+                    ...($b->payment_reference ? [__('Payment reference') => $b->payment_reference] : []),
                 ];
             @endphp
 

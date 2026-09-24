@@ -91,6 +91,59 @@ test('all three types produce the same shape', function () {
             ->and($summary->detail)->toBeString()->not->toBeEmpty()
             ->and($summary->total)->toBeInt()
             ->and($summary->paid)->toBeInt()
-            ->and($summary->balance)->toBeInt();
+            ->and($summary->balance)->toBeInt()
+            ->and($summary->dates)->toBeArray()->not->toBeEmpty()
+            ->and($summary->days)->toBe(count($summary->dates))
+            ->and($summary->hasGaps())->toBeFalse();
     }
+});
+
+/*
+|--------------------------------------------------------------------------
+| Days with gaps
+|--------------------------------------------------------------------------
+|
+| A guest booking the 9th and the 20th has bought two days, not twelve. The summary is
+| what the emails and the admin tables read, so it has to say so.
+|
+*/
+
+test('a booking on separate days carries every day it covers', function () {
+    $booking = Booking::factory()->create(['start_hour' => 8, 'end_hour' => 12]);
+    $booking->syncDates(['2027-04-09', '2027-04-15', '2027-04-20']);
+
+    $summary = ReservationSummary::fromHallBooking($booking->fresh());
+
+    expect($summary->dates)->toBe(['2027-04-09', '2027-04-15', '2027-04-20'])
+        ->and($summary->days)->toBe(3)
+        ->and($summary->hasGaps())->toBeTrue()
+        ->and($summary->occursAtLabel)->toContain('Apr 9, 15 & 20, 2027')
+        ->and($summary->occursAtLabel)->toContain('8AM–12PM each day');
+});
+
+test('a catering order on separate days charges the head count for each of them', function () {
+    $order = CateringOrder::factory()->create(['guests' => 80]);
+    $order->syncDates(['2027-06-11', '2027-06-25']);
+
+    $summary = ReservationSummary::fromCateringOrder($order->fresh());
+
+    expect($summary->days)->toBe(2)
+        ->and($summary->hasGaps())->toBeTrue()
+        ->and($summary->occursAtLabel)->toContain('Jun 11 & 25, 2027')
+        ->and($summary->occursAtLabel)->toContain('80 guests each day');
+});
+
+// An overnight stay is still written check-in to check-out: that span is what the guest
+// recognises, and the room genuinely is theirs throughout it.
+test('an overnight stay is still described as a range', function () {
+    $room = Room::factory()->withRates([24 => 2500])->create();
+    $booking = RoomBooking::factory()->for($room)->overnight(3)->create(['starts_at' => '2027-05-10 14:00:00']);
+
+    $summary = ReservationSummary::fromRoomBooking($booking->fresh());
+
+    expect($summary->dates)->toBe(['2027-05-10', '2027-05-11', '2027-05-12'])
+        ->and($summary->days)->toBe(3)
+        ->and($summary->hasGaps())->toBeFalse()
+        ->and($summary->occursAtLabel)->toContain('May 10–13, 2027')
+        ->and($summary->occursAtLabel)->toContain('3 nights');
 });

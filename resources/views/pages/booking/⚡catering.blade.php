@@ -1,13 +1,16 @@
 <?php
 
 use App\Enums\BookingStatus;
-use App\Livewire\BooksDateRangeComponent;
+use App\Enums\PaymentStatus;
+use App\Livewire\BooksDatesComponent;
 use App\Models\CateringOrder;
 use App\Models\CateringPackage;
 use App\Support\Availability;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -15,42 +18,29 @@ use Livewire\Attributes\Title;
 new
 #[Layout('layouts::marketing')]
 #[Title('Order Catering')]
-class extends BooksDateRangeComponent {
+class extends BooksDatesComponent {
     public ?int $package_id = null;
 
     public ?int $guests = null;
 
     public bool $include_skirting = true;
 
-    public string $guest_name = '';
-
-    public string $guest_phone = '';
-
-    public string $guest_email = '';
-
     /**
-     * Whether the GCash panel is open, i.e. the form validated and we are waiting
-     * for the guest to say they have sent the downpayment.
-     */
-    public bool $showPayment = false;
-
-    /**
-     * The reference of the order just created, which switches the page to the
-     * confirmation view.
-     */
-    public ?string $reference = null;
-
-    /**
-     * Prefill the contact fields for a signed-in guest.
+     * Take the contact details of a signed-in guest, and whatever a guest coming back
+     * from PayMongo brought with them.
      */
     public function mount(): void
     {
-        if ($user = Auth::user()) {
-            $this->guest_name = $user->name;
-            $this->guest_email = $user->email;
-        }
-
+        $this->prefillFromSession();
         $this->discardUnusableDate();
+    }
+
+    /**
+     * How the payment routes name this page.
+     */
+    protected function reservationType(): string
+    {
+        return 'catering';
     }
 
     /**
@@ -73,8 +63,21 @@ class extends BooksDateRangeComponent {
     {
         return [
             'package_id' => ['required', 'integer', 'exists:catering_packages,id'],
-            'start_date' => ['required', 'date', 'after_or_equal:today'],
-            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
+            'dates' => [
+                'required',
+                'array',
+                'min:1',
+                'max:'.self::MAX_DATES,
+                function (string $attribute, mixed $value, callable $fail) {
+                    foreach ((array) $value as $date) {
+                        if (rescue(fn () => Carbon::parse($date)->startOfDay(), null, report: false)?->lt(today()) ?? true) {
+                            $fail(__('Pick dates from today onwards.'));
+
+                            return;
+                        }
+                    }
+                },
+            ],
             'guests' => [
                 'required',
                 'integer',
@@ -88,9 +91,7 @@ class extends BooksDateRangeComponent {
                 },
             ],
             'include_skirting' => ['boolean'],
-            'guest_name' => ['required', 'string', 'min:2', 'max:100'],
-            'guest_phone' => ['required', 'string', 'regex:/^09\d{9}$/'],
-            'guest_email' => ['required', 'email:rfc', 'max:255'],
+            ...$this->guestRules(),
         ];
     }
 
@@ -103,9 +104,8 @@ class extends BooksDateRangeComponent {
     {
         return [
             'package_id.required' => __('Choose a catering package first.'),
-            'start_date.required' => __('Pick your dates on the calendar.'),
-            'start_date.after_or_equal' => __('Pick an event date from today onwards.'),
-            'end_date.after_or_equal' => __('The last day cannot come before the first.'),
+            'dates.required' => __('Pick at least one event date on the calendar.'),
+            'dates.max' => __('An order can cover at most :count days.', ['count' => self::MAX_DATES]),
             'guests.required' => __('Tell us how many guests you are expecting.'),
             'guest_phone.regex' => __('Enter an 11-digit mobile number starting with 09, e.g. 09123456789.'),
         ];
@@ -139,7 +139,7 @@ class extends BooksDateRangeComponent {
     #[Computed]
     public function quote(): ?array
     {
-        if (! $this->package || ! $this->guests || $this->guests < 1 || ! $this->hasDateRange()) {
+        if (! $this->package || ! $this->guests || $this->guests < 1 || ! $this->hasDates()) {
             return null;
         }
 
@@ -166,31 +166,23 @@ class extends BooksDateRangeComponent {
     }
 
     /**
-     * Validate the form and open the GCash panel.
+     * Write the order and send the guest to PayMongo to pay for it.
+     *
+     * Catering closes no dates off, so nothing is held against anyone else here — but the
+     * order still waits on the money before it counts as confirmed.
      */
-    public function proceedToPayment(): void
+    public function proceedToPayment(): mixed
     {
-        $this->validate();
+        if (! $this->paymentsAvailable) {
+            throw ValidationException::withMessages([
+                'dates' => __('Online payment is temporarily unavailable. Please call the resort to order.'),
+            ]);
+        }
 
-        $this->showPayment = true;
-    }
-
-    /**
-     * Close the GCash panel without ordering.
-     */
-    public function cancelPayment(): void
-    {
-        $this->showPayment = false;
-    }
-
-    /**
-     * Record the order as pending once the guest says the downpayment is sent.
-     */
-    public function confirmPayment(): void
-    {
         $validated = $this->validate();
         // The form field is `package_id`; the column it maps to is `catering_package_id`.
-        unset($validated['package_id']);
+        // `dates` is not a column at all — the days are written by syncDates() below.
+        unset($validated['package_id'], $validated['dates']);
 
         $package = $this->package;
         $quote = $package->quote($this->guests, $this->include_skirting, $this->days);
@@ -200,16 +192,22 @@ class extends BooksDateRangeComponent {
             'catering_package_id' => $package->id,
             'reference' => CateringOrder::generateReference(),
             'user_id' => Auth::id(),
+            // Overwritten by syncDates() below; set here because the columns are NOT NULL
+            // and the row has to exist before its days can be written.
+            'start_date' => $this->firstDate(),
+            'end_date' => $this->lastDate(),
             'days' => $this->days,
             'price_per_head' => $package->price_per_head,
             ...$quote,
             'status' => BookingStatus::Pending,
+            'payment_provider' => 'paymongo',
+            'payment_status' => PaymentStatus::Awaiting,
+            'payment_expires_at' => now()->addMinutes((int) config('services.paymongo.hold_minutes')),
         ]);
 
-        $order->sendPlacementNotifications();
+        $order->syncDates($this->bookedDates());
 
-        $this->showPayment = false;
-        $this->reference = $order->reference;
+        return $this->sendToCheckout($order, $quote['downpayment'], $package->name);
     }
 
     /**
@@ -217,8 +215,8 @@ class extends BooksDateRangeComponent {
      */
     public function orderAnother(): void
     {
-        $this->reset(['package_id', 'guests', 'reference', 'showPayment']);
-        $this->resetDateRange();
+        $this->reset(['package_id', 'guests', 'reference', 'paymentError']);
+        $this->resetDates();
         $this->include_skirting = true;
         $this->mount();
     }
@@ -251,7 +249,7 @@ class extends BooksDateRangeComponent {
                             $rows = [
                                 __('Reference') => $order->reference,
                                 __('Package') => $order->package->name,
-                                trans_choice('{1} Event date|[2,*] Event dates', $order->days) => \App\Support\DateRange::label($order->start_date, $order->end_date)
+                                trans_choice('{1} Event date|[2,*] Event dates', $order->days) => \App\Support\DateList::label($order->dateList())
                                     .($order->days > 1 ? ' ('.trans_choice('{1} :count day|[2,*] :count days', $order->days, ['count' => $order->days]).')' : ''),
                                 $order->days > 1 ? __('Guests per day') : __('Guests') => number_format($order->guests),
                                 __('Name') => $order->guest_name,
@@ -431,16 +429,15 @@ class extends BooksDateRangeComponent {
                         <div>
                             <x-booking.availability-calendar
                                 :month="$this->calendar"
-                                :start="$start_date"
-                                :end="$end_date"
+                                :dates="$dates"
                                 :availability="$this->availability"
                                 :label="__('Event dates')"
                                 :hint="__('Tap a day to order for it. Tap a later day to cater the same menu across several days.')"
                             />
 
-                            @if ($this->hasDateRange())
+                            @if ($this->hasDates())
                                 <p class="mt-2 text-sm font-medium text-brand-900">
-                                    {{ $this->rangeLabel }}
+                                    {{ $this->datesLabel }}
                                     @if ($this->days > 1)
                                         <span class="text-brand-800/60">
                                             {{ trans_choice('{1} · :count day|[2,*] · :count days', $this->days, ['count' => $this->days]) }}
@@ -449,10 +446,7 @@ class extends BooksDateRangeComponent {
                                 </p>
                             @endif
 
-                            @error('start_date')
-                                <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
-                            @enderror
-                            @error('end_date')
+                            @error('dates')
                                 <p class="mt-2 text-sm font-medium text-red-600">{{ $message }}</p>
                             @enderror
                         </div>
@@ -554,73 +548,5 @@ class extends BooksDateRangeComponent {
             </div>
         </section>
 
-        {{-- GCash panel --}}
-        @if ($showPayment && $this->quote)
-            <div
-                class="fixed inset-0 z-60 flex items-end justify-center bg-brand-950/70 p-4 backdrop-blur-sm sm:items-center"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="payment-title"
-            >
-                <div class="max-h-full w-full max-w-md overflow-y-auto border-t-2 border-gold-400 bg-white p-6 shadow-2xl sm:p-8">
-                    <div class="flex items-start justify-between gap-4">
-                        <h2 id="payment-title" class="font-serif text-2xl font-medium text-brand-900">{{ __('GCash payment') }}</h2>
-
-                        <button
-                            type="button"
-                            wire:click="cancelPayment"
-                            class="-me-2 -mt-1 flex size-9 items-center justify-center text-brand-800/60 transition-colors hover:bg-sand-100 hover:text-brand-900"
-                        >
-                            <span class="sr-only">{{ __('Close') }}</span>
-                            <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    </div>
-
-                    <p class="mt-4 text-sm text-brand-800/70">{{ __('Send this amount to hold your date:') }}</p>
-
-                    <p class="mt-1 font-serif text-5xl font-medium text-brand-800">₱{{ number_format($this->quote['downpayment']) }}</p>
-
-                    <dl class="mt-6 space-y-2.5 bg-sand-100 p-5 text-sm">
-                        <div class="flex justify-between gap-4">
-                            <dt class="text-brand-800/60">{{ __('Merchant') }}</dt>
-                            <dd class="font-medium text-brand-900">{{ config('app.name') }}</dd>
-                        </div>
-                        <div class="flex justify-between gap-4">
-                            <dt class="text-brand-800/60">{{ __('GCash number') }}</dt>
-                            <dd class="font-medium text-brand-900">{{ config('resort.gcash.number') }}</dd>
-                        </div>
-                        <div class="flex justify-between gap-4">
-                            <dt class="text-brand-800/60">{{ __('Account name') }}</dt>
-                            <dd class="font-medium text-brand-900">{{ config('resort.gcash.account_name') }}</dd>
-                        </div>
-                    </dl>
-
-                    <p class="mt-4 text-sm text-brand-800/70">
-                        {{ __('Send the exact amount, then keep a screenshot of your receipt — we will ask for it if we cannot match your payment.') }}
-                    </p>
-
-                    <button
-                        type="button"
-                        wire:click="confirmPayment"
-                        class="mt-6 eyebrow w-full bg-brand-800 px-6 py-4 text-[11px] text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        wire:loading.attr="disabled"
-                        wire:target="confirmPayment"
-                    >
-                        <span wire:loading.remove wire:target="confirmPayment">{{ __('I have sent the payment') }}</span>
-                        <span wire:loading wire:target="confirmPayment">{{ __('Saving your order…') }}</span>
-                    </button>
-
-                    <button
-                        type="button"
-                        wire:click="cancelPayment"
-                        class="eyebrow mt-3 w-full px-6 py-3.5 text-[11px] text-brand-800/70 transition-colors hover:bg-sand-100"
-                    >
-                        {{ __('Go back') }}
-                    </button>
-                </div>
-            </div>
-        @endif
     @endif
 </div>

@@ -17,8 +17,7 @@ function fillCateringOrder(CateringPackage $package, array $overrides = []): Tes
 
     $input = array_merge([
         'package_id' => $package->id,
-        'start_date' => now()->addMonth()->toDateString(),
-        'end_date' => now()->addMonth()->toDateString(),
+        'dates' => [now()->addMonth()->toDateString()],
         'guests' => 80,
         'include_skirting' => true,
         'guest_name' => 'Juan dela Cruz',
@@ -34,6 +33,8 @@ function fillCateringOrder(CateringPackage $package, array $overrides = []): Tes
 }
 
 beforeEach(function () {
+    fakePayMongo();
+
     $this->package = CateringPackage::factory()->create([
         'name' => 'Mediterranean Mezze',
         'price_per_head' => 450,
@@ -100,11 +101,7 @@ test('a guest can order catering without an account', function () {
     fillCateringOrder($this->package)
         ->call('proceedToPayment')
         ->assertHasNoErrors()
-        ->assertSet('showPayment', true)
-        ->call('confirmPayment')
-        ->assertHasNoErrors()
-        ->assertSet('showPayment', false)
-        ->assertSee('Order received');
+        ->assertRedirect(FAKE_CHECKOUT_URL);
 
     $order = CateringOrder::sole();
 
@@ -123,7 +120,7 @@ test('a guest can order catering without an account', function () {
 });
 
 test('the price per head is captured so later price changes do not rewrite the order', function () {
-    fillCateringOrder($this->package)->call('confirmPayment')->assertHasNoErrors();
+    fillCateringOrder($this->package)->call('proceedToPayment')->assertHasNoErrors();
 
     $this->package->update(['price_per_head' => 900]);
 
@@ -141,7 +138,7 @@ test('a signed-in guest has their order linked to their account', function () {
         ->assertSet('guest_name', 'Maria Santos')
         ->assertSet('guest_email', 'maria@example.com');
 
-    fillCateringOrder($this->package)->call('confirmPayment')->assertHasNoErrors();
+    fillCateringOrder($this->package)->call('proceedToPayment')->assertHasNoErrors();
 
     expect(CateringOrder::sole()->user_id)->toBe($user->id);
 });
@@ -168,11 +165,10 @@ test('a package must be chosen', function () {
 
 test('the event date cannot be in the past', function () {
     fillCateringOrder($this->package, [
-        'start_date' => now()->subDay()->toDateString(),
-        'end_date' => now()->subDay()->toDateString(),
+        'dates' => [now()->subDay()->toDateString()],
     ])
         ->call('proceedToPayment')
-        ->assertHasErrors(['start_date' => 'after_or_equal']);
+        ->assertHasErrors('dates');
 });
 
 test('a multi-day quote charges the head count and skirting for every day', function () {
@@ -187,11 +183,10 @@ test('a multi-day quote charges the head count and skirting for every day', func
 });
 
 test('an order can run across several days', function () {
-    $start = now()->addMonth()->toDateString();
-    $end = now()->addMonth()->addDays(2)->toDateString();
+    $days = collect(range(0, 2))->map(fn (int $i) => now()->addMonth()->addDays($i)->toDateString())->all();
 
-    fillCateringOrder($this->package, ['start_date' => $start, 'end_date' => $end])
-        ->call('confirmPayment')
+    fillCateringOrder($this->package, ['dates' => $days])
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     $order = CateringOrder::sole();
@@ -203,17 +198,36 @@ test('an order can run across several days', function () {
         ->skirting_total->toBe(15_000)
         ->total->toBe(123_000);
 
-    expect($order->start_date->toDateString())->toBe($start)
-        ->and($order->end_date->toDateString())->toBe($end);
+    expect($order->dateList())->toBe($days)
+        ->and($order->start_date->toDateString())->toBe($days[0])
+        ->and($order->end_date->toDateString())->toBe($days[2]);
 });
 
-test('the last day cannot come before the first', function () {
-    fillCateringOrder($this->package, [
-        'start_date' => now()->addMonth()->toDateString(),
-        'end_date' => now()->addDays(2)->toDateString(),
-    ])
+// The head count is served on each day chosen, so three scattered days cost the same as
+// three consecutive ones — and nothing is charged for the weeks in between.
+test('an order can cover days that are not consecutive', function () {
+    $days = [
+        now()->addMonth()->toDateString(),
+        now()->addMonth()->addWeek()->toDateString(),
+        now()->addMonth()->addWeeks(2)->toDateString(),
+    ];
+
+    fillCateringOrder($this->package, ['dates' => $days])
         ->call('proceedToPayment')
-        ->assertHasErrors(['end_date' => 'after_or_equal']);
+        ->assertHasNoErrors();
+
+    $order = CateringOrder::sole();
+
+    expect($order->days)->toBe(3)
+        ->and($order->dateList())->toBe($days)
+        ->and($order->catering_total)->toBe(108_000)
+        ->and($order->dates()->count())->toBe(3);
+});
+
+test('an order with no dates at all is refused', function () {
+    fillCateringOrder($this->package, ['dates' => []])
+        ->call('proceedToPayment')
+        ->assertHasErrors(['dates' => 'required']);
 
     expect(CateringOrder::count())->toBe(0);
 });
@@ -234,7 +248,7 @@ test('an order below the package minimum is rejected', function () {
 
 test('an order at exactly the package minimum is accepted', function () {
     fillCateringOrder($this->package, ['guests' => 20])
-        ->call('confirmPayment')
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(CateringOrder::sole()->guests)->toBe(20);
@@ -257,8 +271,8 @@ test('two orders can share the same event date', function () {
 
     CateringOrder::factory()->for($this->package, 'package')->create(['start_date' => $date]);
 
-    fillCateringOrder($this->package, ['start_date' => $date, 'end_date' => $date])
-        ->call('confirmPayment')
+    fillCateringOrder($this->package, ['dates' => [$date]])
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(CateringOrder::count())->toBe(2);

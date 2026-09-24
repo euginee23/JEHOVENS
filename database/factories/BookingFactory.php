@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\Hall;
+use App\Support\DateRange;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -47,25 +48,33 @@ class BookingFactory extends Factory
 
     /**
      * Settle the date range, then fill the money columns from the hall's own pricing.
+     *
+     * Bookings built here always run over consecutive days, which is what almost every
+     * test wants. One that needs days with gaps in them calls `syncDates()` on the result
+     * and says so out loud.
      */
     public function configure(): static
     {
-        return $this->afterMaking(function (Booking $booking) {
-            // Both ends are settled here rather than in a state, so an explicit
-            // `start_date` passed to create() is the one the range is measured from.
-            $booking->end_date ??= $booking->start_date->copy()->addDays(max($booking->days, 1) - 1);
-            $booking->days = (int) $booking->start_date->diffInDays($booking->end_date) + 1;
+        return $this
+            ->afterMaking(function (Booking $booking) {
+                // Both ends are settled here rather than in a state, so an explicit
+                // `start_date` passed to create() is the one the range is measured from.
+                $booking->end_date ??= $booking->start_date->copy()->addDays(max($booking->days, 1) - 1);
+                $booking->days = (int) $booking->start_date->diffInDays($booking->end_date) + 1;
 
-            $quote = $booking->hall->quote($booking->hours, $booking->include_skirting, $booking->days);
+                $quote = $booking->hall->quote($booking->hours, $booking->include_skirting, $booking->days);
 
-            $booking->forceFill([
-                'rent_total' => $quote['rent_total'],
-                'skirting_total' => $quote['skirting_total'],
-                'total' => $quote['total'],
-                'downpayment' => $quote['downpayment'],
-                'balance' => $quote['balance'],
-            ]);
-        });
+                $booking->forceFill([
+                    'rent_total' => $quote['rent_total'],
+                    'skirting_total' => $quote['skirting_total'],
+                    'total' => $quote['total'],
+                    'downpayment' => $quote['downpayment'],
+                    'balance' => $quote['balance'],
+                ]);
+            })
+            ->afterCreating(function (Booking $booking) {
+                $booking->syncDates(DateRange::daysBetween($booking->start_date, $booking->end_date));
+            });
     }
 
     /**

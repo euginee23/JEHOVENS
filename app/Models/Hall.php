@@ -41,6 +41,14 @@ class Hall extends Model implements Photographable
     public const HOURS_PER_BLOCK = 4;
 
     /**
+     * The shortest booking the resort will take, in hours.
+     *
+     * A guest may book any whole number of hours from here up, so a 7:00 AM to 12:00 PM
+     * event is fine; it is only the billing that still counts in whole blocks.
+     */
+    public const MINIMUM_HOURS = 4;
+
+    /**
      * Earliest hour of the day a booking may start (24-hour clock).
      */
     public const OPENS_AT = 7;
@@ -108,13 +116,16 @@ class Hall extends Model implements Photographable
      * `$hours` is the slot held on each day and `$days` is how many days the booking runs
      * for, so the hall is re-rented — and re-skirted — for every day of a multi-day event.
      *
+     * A part block bills as a whole one — five hours is two blocks — because the hall
+     * cannot be re-let for the remainder of a block the guest has run into.
+     *
      * The downpayment is rounded up so the resort is never short a peso on an odd total.
      *
      * @return array{blocks: int, rent_total: int, skirting_total: int, total: int, downpayment: int, balance: int}
      */
     public function quote(int $hours, bool $includeSkirting, int $days = 1): array
     {
-        $blocks = intdiv($hours, self::HOURS_PER_BLOCK);
+        $blocks = (int) ceil(max($hours, 1) / self::HOURS_PER_BLOCK);
         $days = max($days, 1);
 
         $rentTotal = $this->rent_price * $blocks * $days;

@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\BookingStatus;
 use App\Models\Room;
 use App\Models\RoomBooking;
+use App\Support\DateRange;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Carbon;
 
@@ -50,6 +51,26 @@ class RoomBookingFactory extends Factory
             'balance' => $total - (int) ceil($total * Room::DOWNPAYMENT_RATE),
             'status' => BookingStatus::Pending,
         ];
+    }
+
+    /**
+     * List out the days the stay occupies, once the stay itself is settled.
+     *
+     * Those are the nights slept rather than the span: a stay ending at 10am on the 13th
+     * leaves the room free that day. A day use has no nights but still holds its one day.
+     *
+     * Stays built here always run over consecutive days. One that needs days with gaps in
+     * them calls `syncDates()` on the result and says so out loud.
+     */
+    public function configure(): static
+    {
+        return $this->afterCreating(function (RoomBooking $booking) {
+            $first = $booking->starts_at->copy()->startOfDay();
+
+            $booking->syncDates(
+                DateRange::daysBetween($first, $first->copy()->addDays(max($booking->nights, 1) - 1))
+            );
+        });
     }
 
     /**

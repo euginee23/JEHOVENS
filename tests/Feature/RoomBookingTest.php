@@ -18,8 +18,8 @@ function fillRoomBooking(Room $room, array $overrides = []): Testable
 
     $input = array_merge([
         'room_id' => $room->id,
-        'start_date' => now()->addWeek()->toDateString(),
-        'end_date' => now()->addWeek()->toDateString(),
+        'dates' => [now()->addWeek()->toDateString()],
+        'stay_mode' => 'day',
         'entry_hour' => 14,
         'rate_id' => $room->rates->firstWhere('hours', 6)->id,
         'payment_option' => 'downpayment',
@@ -36,6 +36,8 @@ function fillRoomBooking(Room $room, array $overrides = []): Testable
 }
 
 beforeEach(function () {
+    fakePayMongo();
+
     $this->room = Room::factory()
         ->withRates([6 => 1200, 12 => 1800, 24 => 2500])
         ->create(['name' => 'Standard Room 101']);
@@ -90,10 +92,7 @@ test('a guest can book a room without an account', function () {
     fillRoomBooking($this->room)
         ->call('proceedToPayment')
         ->assertHasNoErrors()
-        ->assertSet('showPayment', true)
-        ->call('confirmPayment')
-        ->assertHasNoErrors()
-        ->assertSee('Booking received');
+        ->assertRedirect(FAKE_CHECKOUT_URL);
 
     $booking = RoomBooking::sole();
 
@@ -115,7 +114,7 @@ test('a stay that runs past midnight ends on the next day', function () {
     fillRoomBooking($this->room, [
         'entry_hour' => 22,
         'rate_id' => $this->room->rates->firstWhere('hours', 6)->id,
-    ])->call('confirmPayment')->assertHasNoErrors();
+    ])->call('proceedToPayment')->assertHasNoErrors();
 
     $booking = RoomBooking::sole();
 
@@ -126,7 +125,7 @@ test('a stay that runs past midnight ends on the next day', function () {
 test('the guest is asked to arrive half an hour early', function () {
     fillRoomBooking($this->room, ['entry_hour' => 14])->assertSee('1:30 PM');
 
-    fillRoomBooking($this->room)->call('confirmPayment');
+    fillRoomBooking($this->room)->call('proceedToPayment');
 
     expect(RoomBooking::sole()->arriveBy()->format('H:i'))->toBe('13:30');
 });
@@ -140,7 +139,7 @@ test('a signed-in guest has their booking linked to their account', function () 
         ->assertSet('guest_name', 'Maria Santos')
         ->assertSet('guest_email', 'maria@example.com');
 
-    fillRoomBooking($this->room)->call('confirmPayment')->assertHasNoErrors();
+    fillRoomBooking($this->room)->call('proceedToPayment')->assertHasNoErrors();
 
     expect(RoomBooking::sole()->user_id)->toBe($user->id);
 });
@@ -153,11 +152,10 @@ test('a room must be chosen', function () {
 
 test('the check-in date cannot be in the past', function () {
     fillRoomBooking($this->room, [
-        'start_date' => now()->subDay()->toDateString(),
-        'end_date' => now()->subDay()->toDateString(),
+        'dates' => [now()->subDay()->toDateString()],
     ])
         ->call('proceedToPayment')
-        ->assertHasErrors(['start_date' => 'after_or_equal']);
+        ->assertHasErrors('dates');
 });
 
 test('an entry time is required', function () {
@@ -175,8 +173,8 @@ test('a duration is required', function () {
 test('a same-day booking is day use, priced at the chosen block', function () {
     $date = now()->addWeek()->toDateString();
 
-    fillRoomBooking($this->room, ['start_date' => $date, 'end_date' => $date])
-        ->call('confirmPayment')
+    fillRoomBooking($this->room, ['dates' => [$date]])
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     $booking = RoomBooking::sole();
@@ -190,49 +188,82 @@ test('a same-day booking is day use, priced at the chosen block', function () {
         ->toBe(Carbon::parse($date)->setTime(20, 0)->toDateTimeString());
 });
 
-test('a stay across several days is priced at the nightly rate per night', function () {
-    $start = now()->addWeek()->toDateString();
-    $end = now()->addWeek()->addDays(3)->toDateString();
+// The nights tapped are the nights slept: three nights from the 10th means the 10th, 11th
+// and 12th, and the guest leaves on the morning of the 13th.
+test('a stay across several nights is priced at the nightly rate per night', function () {
+    $nights = collect(range(0, 2))->map(fn (int $i) => now()->addWeek()->addDays($i)->toDateString())->all();
 
-    fillRoomBooking($this->room, ['start_date' => $start, 'end_date' => $end])
-        ->call('confirmPayment')
+    fillRoomBooking($this->room, ['dates' => $nights, 'stay_mode' => 'overnight', 'rate_id' => null])
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     $booking = RoomBooking::sole();
 
     expect($booking)
         ->nights->toBe(3)
-        ->hours->toBe(72)
+        ->days->toBe(3)
         ->total->toBe(7_500)      // 2,500 nightly × 3 nights
         ->amount_paid->toBe(3_750)
-        ->and($booking->isOvernight())->toBeTrue();
+        ->and($booking->isOvernight())->toBeTrue()
+        ->and($booking->dateList())->toBe($nights);
 
-    // Check-out is the entry time on the last day, not midnight.
+    // Check-out is the entry time the morning after the last night, not midnight.
     expect($booking->ends_at->toDateTimeString())
-        ->toBe(Carbon::parse($end)->setTime(14, 0)->toDateTimeString());
+        ->toBe(Carbon::parse($nights[2])->addDay()->setTime(14, 0)->toDateTimeString());
 });
 
 test('an overnight stay does not need a day-use duration', function () {
     fillRoomBooking($this->room, [
-        'start_date' => now()->addWeek()->toDateString(),
-        'end_date' => now()->addWeek()->addDay()->toDateString(),
+        'dates' => [now()->addWeek()->toDateString(), now()->addWeek()->addDay()->toDateString()],
+        'stay_mode' => 'overnight',
         'rate_id' => null,
     ])
         ->call('proceedToPayment')
         ->assertHasNoErrors();
 });
 
-test('a room with no overnight rate cannot be booked across days', function () {
+// Nights run into one another, so a gap in them is not a stay — it is two stays.
+test('an overnight stay must be a run of nights in a row', function () {
+    fillRoomBooking($this->room, [
+        'dates' => [now()->addWeek()->toDateString(), now()->addWeeks(2)->toDateString()],
+        'stay_mode' => 'overnight',
+        'rate_id' => null,
+    ])
+        ->call('proceedToPayment')
+        ->assertHasErrors('dates');
+
+    expect(RoomBooking::count())->toBe(0);
+});
+
+// Day use has no such problem: each day is its own block, so gaps are fine.
+test('day use can be booked on several separate days', function () {
+    $days = [now()->addWeek()->toDateString(), now()->addWeeks(2)->toDateString()];
+
+    fillRoomBooking($this->room, ['dates' => $days, 'stay_mode' => 'day'])
+        ->call('proceedToPayment')
+        ->assertHasNoErrors();
+
+    $booking = RoomBooking::sole();
+
+    expect($booking)
+        ->nights->toBe(0)
+        ->days->toBe(2)
+        ->hours->toBe(6)          // the block is per day, not the total
+        ->total->toBe(2_400)      // 1,200 × 2 days
+        ->and($booking->dateList())->toBe($days);
+});
+
+test('a room with no overnight rate cannot be stayed in overnight', function () {
     $dayUseOnly = Room::factory()->withRates([6 => 1200])->create(['name' => 'Cabana']);
 
     fillRoomBooking($dayUseOnly, [
         'room_id' => $dayUseOnly->id,
-        'rate_id' => $dayUseOnly->rates()->sole()->id,
-        'start_date' => now()->addWeek()->toDateString(),
-        'end_date' => now()->addWeek()->addDay()->toDateString(),
+        'rate_id' => null,
+        'stay_mode' => 'overnight',
+        'dates' => [now()->addWeek()->toDateString(), now()->addWeek()->addDay()->toDateString()],
     ])
         ->call('proceedToPayment')
-        ->assertHasErrors('end_date');
+        ->assertHasErrors('dates');
 
     expect(RoomBooking::count())->toBe(0);
 });
@@ -244,12 +275,11 @@ test('an overnight stay blocks every night it covers', function () {
 
     // A day-use booking in the middle of that stay has nowhere to go.
     fillRoomBooking($this->room, [
-        'start_date' => now()->addWeek()->addDay()->toDateString(),
-        'end_date' => now()->addWeek()->addDay()->toDateString(),
+        'dates' => [now()->addWeek()->addDay()->toDateString()],
         'entry_hour' => 10,
     ])
         ->call('proceedToPayment')
-        ->assertHasErrors('start_date');
+        ->assertHasErrors('dates');
 
     expect(RoomBooking::count())->toBe(1);
 });
@@ -291,7 +321,7 @@ test('a room cannot be double-booked for an overlapping stay', function () {
 
     fillRoomBooking($this->room, ['entry_hour' => 16])
         ->call('proceedToPayment')
-        ->assertHasErrors('start_date');
+        ->assertHasErrors('dates');
 
     expect(RoomBooking::count())->toBe(1);
 });
@@ -306,7 +336,7 @@ test('a stay starting when another ends is allowed', function () {
     ]);
 
     fillRoomBooking($this->room, ['entry_hour' => 14])
-        ->call('confirmPayment')
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(RoomBooking::count())->toBe(2);
@@ -322,7 +352,7 @@ test('a cancelled booking frees the room again', function () {
     ]);
 
     fillRoomBooking($this->room)
-        ->call('confirmPayment')
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(RoomBooking::where('status', BookingStatus::Pending)->count())->toBe(1);
@@ -339,7 +369,7 @@ test('another room is still free at the same time', function () {
     ]);
 
     fillRoomBooking($this->room)
-        ->call('confirmPayment')
+        ->call('proceedToPayment')
         ->assertHasNoErrors();
 
     expect(RoomBooking::count())->toBe(2);
@@ -421,7 +451,7 @@ test('the page pre-fills itself from the availability bar', function () {
 
     Livewire::withQueryParams(['date' => $date, 'entry' => 14, 'hours' => 24])
         ->test('pages::booking.rooms')
-        ->assertSet('start_date', $date)
+        ->assertSet('dates', [$date])
         ->assertSet('entry_hour', 14)
         ->assertSet('preferred_hours', 24);
 });
@@ -452,16 +482,29 @@ test('a searched duration this room does not sell leaves the picker empty', func
 test('an unusable date or entry hour from the query string is discarded', function () {
     Livewire::withQueryParams(['date' => today()->subDay()->toDateString(), 'entry' => 3])
         ->test('pages::booking.rooms')
-        ->assertSet('start_date', '')
+        ->assertSet('dates', [])
         ->assertSet('entry_hour', null);
 
     Livewire::withQueryParams(['date' => 'not-a-date'])
         ->test('pages::booking.rooms')
-        ->assertSet('start_date', '');
+        ->assertSet('dates', []);
+});
+
+/**
+ * The availability bar pre-selects nothing, so an untouched search submits blank fields.
+ * Those must land as empty pickers rather than as a time the guest never chose.
+ */
+test('an untouched availability search leaves the time fields blank', function () {
+    Livewire::withQueryParams(['date' => '', 'entry' => '', 'hours' => ''])
+        ->test('pages::booking.rooms')
+        ->assertSet('dates', [])
+        ->assertSet('entry_hour', null)
+        ->assertSet('preferred_hours', null)
+        ->assertSet('rate_id', null);
 });
 
 test('today is still an acceptable check-in date from the query string', function () {
     Livewire::withQueryParams(['date' => today()->toDateString()])
         ->test('pages::booking.rooms')
-        ->assertSet('start_date', today()->toDateString());
+        ->assertSet('dates', [today()->toDateString()]);
 });
