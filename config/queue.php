@@ -120,6 +120,24 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Draining the Queue From the Scheduler
+    |--------------------------------------------------------------------------
+    |
+    | Booking email is queued, so none of it sends without something draining the
+    | queue. A long-running `queue:work` is the right answer, but plenty of hosting
+    | will not run a daemon — and this application already needs `schedule:run` on
+    | a cron for the unpaid-booking sweeper.
+    |
+    | Turn this on and the scheduler drains the queue every minute as well. Mail is
+    | then up to a minute late, which for a booking confirmation nobody minds. Leave
+    | it off wherever a real worker is running, so the two do not compete.
+    |
+    */
+
+    'drain_on_schedule' => (bool) env('QUEUE_DRAIN_ON_SCHEDULE', false),
+
     'failed' => [
         'driver' => env('QUEUE_FAILED_DRIVER', 'database-uuids'),
         'database' => env('DB_CONNECTION', 'sqlite'),

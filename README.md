@@ -439,17 +439,50 @@ RESORT_NOTIFICATION_EMAIL=bookings@your-domain.com
 `MAIL_FROM_ADDRESS` must be an address your provider is allowed to send as, or the mail
 will be accepted and then silently dropped.
 
-**2. A running queue worker.** The notifications are queued, and `QUEUE_CONNECTION` is
-`database`, so without a worker they pile up in the `jobs` table and **nothing is ever
-sent**. `composer dev` starts one for you locally. On a server, run it under supervisor or
-systemd so it restarts on failure:
+**2. Something draining the queue.** The notifications are queued, and `QUEUE_CONNECTION`
+is `database`, so without a worker they pile up in the `jobs` table and **nothing is ever
+sent**. `composer dev` starts one for you locally — which is why mail works in development
+and can silently stop working in production.
+
+Best, where the host allows a long-running process — under supervisor or systemd, so it
+restarts on failure:
 
 ```bash
 php artisan queue:work --tries=3 --timeout=60
 ```
 
+**No daemons allowed?** Plenty of shared hosting won't run one. Set this instead:
+
+```dotenv
+QUEUE_DRAIN_ON_SCHEDULE=true
+```
+
+The scheduler then drains the queue every minute, riding on the `schedule:run` cron this
+app already needs for the unpaid-booking sweeper. Mail arrives up to a minute late, which
+for a booking confirmation nobody notices. Leave it off wherever a real worker runs, so
+the two aren't draining the same queue.
+
+**Nothing at all — no cron either?** `QUEUE_CONNECTION=sync` sends mail inline during the
+request. No infrastructure needed, but the guest waits on SMTP, and the unpaid-booking
+sweeper still won't run.
+
 Restart the worker after every deploy (`php artisan queue:restart`) — workers hold the old
 code in memory. Check `php artisan queue:failed` if a guest reports a missing email.
+
+**When no email arrives**, there are two quite different causes and one command that tells
+them apart:
+
+```bash
+php artisan resort:mail-check
+```
+
+It sends to `RESORT_MAIL_TEST_ADDRESS`, falling back to `RESORT_NOTIFICATION_EMAIL`, and
+`--to=you@example.com` overrides both.
+
+It prints the mailer and the queue depth, then sends one message *immediately*, skipping
+the queue. If that message arrives but booking email does not, the transport is fine and
+**nothing is draining the queue** — start the worker. A growing "Jobs waiting" count is the
+same story told another way.
 
 ---
 
