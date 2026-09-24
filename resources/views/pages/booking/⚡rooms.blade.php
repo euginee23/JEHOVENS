@@ -374,6 +374,15 @@ class extends BooksDatesComponent {
 
         $quote = $this->room->quote($this->rate, $this->payingInFull(), $this->nights, $this->days);
 
+        // Paying in full is the guest's own way out of a downpayment that is too small,
+        // so point at it rather than sending them away — but only when it would help.
+        $this->assertAmountIsPayable(
+            $quote['amount_paid'],
+            ! $this->payingInFull() && $quote['total'] >= \App\Support\PayMongo::MINIMUM_PESOS
+                ? __('Choose "Pay in full" to book this.')
+                : null,
+        );
+
         // Two guests can reach this point for the same room at once, so the last check
         // runs inside the transaction that writes the booking, behind the room's row lock.
         $booking = DB::transaction(function () use ($quote) {

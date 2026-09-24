@@ -4,6 +4,8 @@ use App\Enums\BookingStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Booking;
 use App\Models\Hall;
+use App\Models\Room;
+use App\Models\RoomBooking;
 use App\Support\PayMongo;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -191,6 +193,11 @@ test('pesos convert to centavos and back', function () {
         ->and(PayMongo::pesos(649_999))->toBe(6_500);
 });
 
+/**
+ * A ₱20 hall is a ₱10 downpayment, under PayMongo's floor. This has to read as a plain
+ * message about the amount — not as "we could not reach the payment provider", which is
+ * untrue and sends the guest away to try again at something that will never work.
+ */
 test('an amount below the gateway minimum is refused before it is sent', function () {
     $hall = Hall::factory()->create(['rent_price' => 20, 'skirting_price' => 0]);
 
@@ -204,8 +211,42 @@ test('an amount below the gateway minimum is refused before it is sent', functio
         ->set('guest_phone', '09171234567')
         ->set('guest_email', 'juan@example.com')
         ->call('proceedToPayment')
-        ->assertHasErrors('dates');
+        ->assertHasErrors('dates')
+        ->assertSee('below the ₱20', escape: false)
+        ->assertDontSee('could not reach the payment provider');
 
+    // Nothing written, so no dates are left held by a booking that cannot be paid for.
     expect(Booking::count())->toBe(0);
     Http::assertNothingSent();
+});
+
+// The guest's own way out, rather than being told to telephone the resort.
+test('a room whose downpayment is too small points at paying in full', function () {
+    $room = Room::factory()->withRates([6 => 20])->create();
+
+    $component = Livewire::test('pages::booking.rooms')
+        ->set('room_id', $room->id)
+        ->set('dates', [now()->addWeek()->toDateString()])
+        ->set('stay_mode', 'day')
+        ->set('entry_hour', 14)
+        ->set('rate_id', $room->rates()->sole()->id)
+        ->set('guest_name', 'Juan dela Cruz')
+        ->set('guest_phone', '09171234567')
+        ->set('guest_email', 'juan@example.com');
+
+    $component->call('proceedToPayment')
+        ->assertHasErrors('dates')
+        ->assertSee('Pay in full', escape: false);
+
+    expect(RoomBooking::count())->toBe(0);
+
+    // And taking that advice gets them through: the whole ₱20 clears the floor.
+    fakePayMongo();
+
+    $component->set('payment_option', 'full')
+        ->call('proceedToPayment')
+        ->assertHasNoErrors()
+        ->assertRedirect(FAKE_CHECKOUT_URL);
+
+    expect(RoomBooking::sole()->amount_paid)->toBe(20);
 });

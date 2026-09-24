@@ -256,6 +256,8 @@ class extends BooksDatesComponent {
 
         $quote = $this->hall->quote($this->hours, $this->include_skirting, $this->days);
 
+        $this->assertAmountIsPayable($quote['downpayment']);
+
         // Two guests can reach this point for the same slot at once, so the last check
         // runs inside the transaction that writes the booking, behind the hall's row lock.
         $booking = DB::transaction(function () use ($validated, $quote) {

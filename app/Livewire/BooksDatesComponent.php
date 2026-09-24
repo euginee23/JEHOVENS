@@ -150,6 +150,33 @@ abstract class BooksDatesComponent extends Component
     }
 
     /**
+     * Refuse, in plain words, an amount the gateway will not take.
+     *
+     * Checked here rather than left to the gateway client, and before the reservation is
+     * written, for two reasons: a booking must not be created and then deleted again over
+     * something knowable up front, and this is not a failure worth reporting — the amount
+     * is simply too small, every time, until the price changes.
+     *
+     * @param  int  $amount  what would be charged now, in whole pesos
+     * @param  string|null  $hint  something the guest could do about it, if anything
+     */
+    protected function assertAmountIsPayable(int $amount, ?string $hint = null): void
+    {
+        if ($amount >= PayMongo::MINIMUM_PESOS) {
+            return;
+        }
+
+        $message = __('The ₱:amount due now is below the ₱:minimum our payment provider will accept.', [
+            'amount' => number_format($amount),
+            'minimum' => number_format(PayMongo::MINIMUM_PESOS),
+        ]);
+
+        throw ValidationException::withMessages([
+            'dates' => $hint ? $message.' '.$hint : $message.' '.__('Please contact the resort to book this.'),
+        ]);
+    }
+
+    /**
      * Send the guest off to PayMongo to pay for the reservation just written.
      *
      * The reservation exists before the redirect, and that is what holds its dates while

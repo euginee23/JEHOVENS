@@ -187,6 +187,8 @@ class extends BooksDatesComponent {
         $package = $this->package;
         $quote = $package->quote($this->guests, $this->include_skirting, $this->days);
 
+        $this->assertAmountIsPayable($quote['downpayment'], __('Please add more guests or days, or contact the resort.'));
+
         $order = CateringOrder::create([
             ...$validated,
             'catering_package_id' => $package->id,
