@@ -40,10 +40,10 @@ return [
     | PayMongo
     |--------------------------------------------------------------------------
     |
-    | Every booking is paid for through PayMongo Checkout, which handles GCash,
-    | Maya, GrabPay and cards and hands back a payment reference the resort can
-    | verify a booking against. Without a secret key the booking pages say so
-    | and refuse to take a booking, rather than recording one nobody paid for.
+    | Every booking is paid for through PayMongo Checkout, which hands back a
+    | payment reference the resort can verify a booking against. Without a secret
+    | key the booking pages say so and refuse to take a booking, rather than
+    | recording one nobody paid for.
     |
     | The webhook secret is NOT in the dashboard — it comes back once, in the
     | response to `POST /v1/webhooks` when the endpoint is registered.
@@ -56,8 +56,12 @@ return [
         'webhook_secret' => env('PAYMONGO_WEBHOOK_SECRET'),
         'base_url' => env('PAYMONGO_BASE_URL', 'https://api.paymongo.com/v1'),
 
-        // What the guest may pay with. Trim this to what the account is enabled for.
-        'methods' => ['gcash', 'paymaya', 'grab_pay', 'card'],
+        // What the guest may pay with. This must list only methods the PayMongo
+        // account is actually enabled for — naming one it is not makes PayMongo
+        // reject the checkout session, which breaks every booking rather than
+        // just that method. Scanning a QR happens inside the GCash and Maya
+        // flows on PayMongo's own page; it is not a separate method here.
+        'methods' => ['gcash', 'paymaya'],
 
         // How long a booking holds its dates while the guest is on PayMongo's page.
         // The sweeper releases anything still unpaid after this, so `schedule:run`

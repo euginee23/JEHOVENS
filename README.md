@@ -298,7 +298,8 @@ three behind its tabs.
 
 ## Payments
 
-Bookings are paid for through **PayMongo Checkout** — GCash, Maya, GrabPay and cards. The
+Bookings are paid for through **PayMongo Checkout** — GCash and Maya, including paying by
+QR, which happens inside those flows on PayMongo's own page. The
 guest fills in the booking form, the booking is written, and they are sent to PayMongo to
 pay. PayMongo reports the payment back to a webhook, which confirms the booking, records
 the payment reference and emails the guest.
@@ -329,6 +330,16 @@ The `secret_key` in the response is `PAYMONGO_WEBHOOK_SECRET`. Deliveries that a
 signed with it are rejected — the endpoint is public, so this is what stops anyone who
 finds the URL confirming bookings for free.
 
+**Subscribe to exactly two events**: `checkout_session.payment.paid` and `payment.failed`.
+The first is what confirms a booking; without it, guests pay and the sweeper cancels them
+an hour later. The app ignores every other event, so subscribing to more only fills the
+`payment_webhook_events` table with noise.
+
+**Payment methods** are set in `config/services.php` under `paymongo.methods`, not here.
+That list must contain only methods your PayMongo account is enabled for — naming one it
+is not makes PayMongo reject the checkout session, which breaks every booking rather than
+just that method.
+
 **A booking holds its dates from the moment the guest is sent to PayMongo**, which is what
 stops two people paying for the same slot. A guest who closes the tab would otherwise hold
 those dates for ever, so the scheduler must be running:
@@ -353,9 +364,16 @@ Every booking email — the guest's receipt, the resort's new-booking alert, and
 each status change and settled balance — goes through `App\Notifications\ReservationNotification`.
 Two things have to be true for a guest to actually receive one.
 
-**1. A real mailer.** `MAIL_MAILER` defaults to `log`, which writes the message into
-`storage/logs/laravel.log` and sends nothing. For a server that should really deliver, set
-these in `.env`:
+**1. A real mailer.** Locally, `.env.example` points at [Mailpit](https://mailpit.axllent.org),
+which catches every outgoing message so nothing reaches a real guest by accident:
+
+```bash
+mailpit          # SMTP on 1025, read what was "sent" at http://localhost:8025
+```
+
+No Mailpit installed? Set `MAIL_MAILER=log` and read `storage/logs/laravel.log` instead.
+
+For a server that should really deliver, set these in `.env`:
 
 ```dotenv
 MAIL_MAILER=smtp

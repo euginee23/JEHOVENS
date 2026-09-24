@@ -114,6 +114,19 @@ test('the guest details are sent so PayMongo can receipt them', function () {
     Http::assertSent(fn (Request $request) => data_get($request->data(), 'data.attributes.billing.email') === 'juan@example.com');
 });
 
+/**
+ * Naming a method the resort's PayMongo account is not enabled for makes PayMongo reject
+ * the whole checkout session, so this breaks every booking rather than just that method.
+ * The list is pinned here so adding one is a deliberate act with the account checked.
+ */
+test('only the payment methods the account is enabled for are offered', function () {
+    fakePayMongo();
+
+    ($this->submit)();
+
+    Http::assertSent(fn (Request $request) => data_get($request->data(), 'data.attributes.payment_method_types') === ['gcash', 'paymaya']);
+});
+
 /*
 |--------------------------------------------------------------------------
 | The booking behind the redirect
