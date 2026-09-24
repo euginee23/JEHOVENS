@@ -130,15 +130,32 @@ test('QR Ph is what the guest is offered', function () {
     Http::assertSent(fn (Request $request) => data_get($request->data(), 'data.attributes.payment_method_types') === ['qrph']);
 });
 
-// The day the wallets go live, emptying the setting hands the choice back to PayMongo.
-test('naming no methods lets PayMongo offer whatever the account has', function () {
-    config(['services.paymongo.methods' => []]);
+/**
+ * PayMongo requires the list — "Parameter payment_method_types is required" — so there is
+ * no offer-everything option, and a server whose .env was never updated must not fail
+ * every booking. The config falls back rather than sending nothing.
+ */
+test('an unset method list falls back to the default rather than sending nothing', function () {
+    config(['services.paymongo.methods' => PayMongo::DEFAULT_METHODS]);
 
     fakePayMongo();
 
     ($this->submit)();
 
-    Http::assertSent(fn (Request $request) => ! array_key_exists('payment_method_types', data_get($request->data(), 'data.attributes')));
+    Http::assertSent(fn (Request $request) => data_get($request->data(), 'data.attributes.payment_method_types') === ['qrph']);
+});
+
+// Belt and braces: if the list is emptied anyway, say so rather than letting PayMongo
+// answer with a pointer into a JSON document.
+test('an empty method list is refused with a message naming the setting', function () {
+    config(['services.paymongo.methods' => []]);
+
+    ($this->submit)()
+        ->assertHasErrors('dates')
+        ->assertDontSee('payment_method_types');
+
+    expect(Booking::count())->toBe(0);
+    Http::assertNothingSent();
 });
 
 /*

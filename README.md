@@ -343,14 +343,18 @@ an hour later. The app ignores every other event, so subscribing to more only fi
 PAYMONGO_METHODS=qrph
 ```
 
-QR Ph is the only method active on the resort's account — the e-wallets stay inactive
-until PayMongo verifies the business. **When they go live, empty this setting** and
-PayMongo will offer everything the account has, with no further change needed.
+PayMongo **requires** this list — a checkout session without it is rejected outright, so
+there is no "offer everything" option. It falls back to `qrph` when unset, so a server
+whose `.env` was never updated still takes payments.
+
+QR Ph is the only method active on the resort's account; the e-wallets stay inactive until
+PayMongo verifies the business. When they go live, add them here:
+`PAYMONGO_METHODS=qrph,gcash,paymaya`.
 
 If a guest reaches the checkout page and it says **"No payment methods are available"**,
-the account has none of the methods named there. Clear `PAYMONGO_METHODS` to fall back to
-whatever the account really offers — and check whether the account is activated at all,
-since a live account awaiting PayMongo's approval has nothing enabled yet.
+the account has none of the methods named in `PAYMONGO_METHODS`. Check Settings → Payment
+Methods for what is actually Active, and name only those — a live account still awaiting
+PayMongo's approval has nothing enabled at all.
 
 To find out what an account offers without making a booking:
 

@@ -26,6 +26,17 @@ class PayMongo
     public const MINIMUM_PESOS = 20;
 
     /**
+     * What to offer when nothing is configured.
+     *
+     * QR Ph settles over InstaPay and needs no merchant wallet, so it is the one method
+     * that works on an account whose e-wallets are still inactive. There is no "offer
+     * everything" option to fall back on instead: PayMongo requires the list.
+     *
+     * @var array<int, string>
+     */
+    public const DEFAULT_METHODS = ['qrph'];
+
+    /**
      * A client built from the configured credentials.
      */
     public static function make(): self
@@ -70,6 +81,12 @@ class PayMongo
      */
     public function createCheckoutSession(CheckoutRequest $request): CheckoutSession
     {
+        if ($request->methods === []) {
+            throw new PayMongoException(
+                'No payment methods are configured. PayMongo requires at least one — set PAYMONGO_METHODS.'
+            );
+        }
+
         if ($request->amount < self::MINIMUM_PESOS) {
             throw new PayMongoException(
                 'PayMongo will not take a payment under ₱'.self::MINIMUM_PESOS.", and this one is ₱{$request->amount}."

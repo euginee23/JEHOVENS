@@ -52,10 +52,15 @@ return [
 
     'channels' => [
 
+        // `ignore_exceptions` is on so that a log file the web server cannot write to
+        // stays a logging problem instead of becoming the whole error page. With it off,
+        // a permission-denied log write throws, Laravel tries to log *that*, and the
+        // guest is shown a wall of repeated Monolog stack traces in place of whatever
+        // the application was actually trying to tell them.
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', (string) env('LOG_STACK', 'single')),
-            'ignore_exceptions' => false,
+            'ignore_exceptions' => true,
         ],
 
         'single' => [

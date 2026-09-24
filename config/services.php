@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\PayMongo;
+
 return [
 
     /*
@@ -63,13 +65,16 @@ return [
         // e-wallet app and it settles over InstaPay, which needs no merchant wallet of
         // its own. The e-wallet methods sit inactive on the account until it is verified.
         //
-        // Naming a method the account does NOT have narrows the checkout page to nothing,
-        // and the guest is told "No payment methods are available" only after committing
-        // to a booking. Set PAYMONGO_METHODS empty to name none of them, which lets
-        // PayMongo offer whatever is enabled — worth doing the day the wallets go live.
+        // PayMongo REQUIRES this list — a request without it is rejected, so there is no
+        // "let PayMongo decide" setting. Naming a method the account does not have is
+        // accepted and then leaves the guest on a checkout page reading "No payment
+        // methods are available", which they only reach after committing to a booking.
+        //
+        // Falls back rather than ever being empty, so a server whose .env was never
+        // updated still takes payments instead of failing every booking.
         'methods' => array_values(array_filter(
-            array_map('trim', explode(',', (string) env('PAYMONGO_METHODS', 'qrph'))),
-        )),
+            array_map('trim', explode(',', (string) env('PAYMONGO_METHODS', ''))),
+        )) ?: PayMongo::DEFAULT_METHODS,
 
         // How long a booking holds its dates while the guest is on PayMongo's page.
         // The sweeper releases anything still unpaid after this, so `schedule:run`
