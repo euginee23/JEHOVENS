@@ -340,6 +340,26 @@ That list must contain only methods your PayMongo account is enabled for — nam
 is not makes PayMongo reject the checkout session, which breaks every booking rather than
 just that method.
 
+### Testing a real payment
+
+PayMongo will not take a payment under **₱20**, and the resort charges a 50% downpayment,
+so ordinary inventory costs too much to test against repeatedly. There is a seeder for
+cheap stand-ins — one hall, one room and one catering package, each costing ₱50 to book
+and ₱25 to pay:
+
+```bash
+php artisan db:seed --class=PaymentTestSeeder
+```
+
+It is not part of `db:seed` and refuses to run in production. Hide the results again with:
+
+```bash
+php artisan tinker --execute 'Database\Seeders\PaymentTestSeeder::deactivate();'
+```
+
+They are deactivated rather than deleted because once anything has been booked against
+them the foreign keys refuse a delete — deliberately, so payment history survives.
+
 **A booking holds its dates from the moment the guest is sent to PayMongo**, which is what
 stops two people paying for the same slot. A guest who closes the tab would otherwise hold
 those dates for ever, so the scheduler must be running:
