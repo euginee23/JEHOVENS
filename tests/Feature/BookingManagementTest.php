@@ -118,6 +118,55 @@ test('the status chips show how many bookings sit in each state', function () {
         ->and($counts['cancelled'])->toBe(1);
 });
 
+/**
+ * The table used to force its own width and then scroll sideways, because the actions
+ * column held up to three buttons whose number changed with the status. The moves live
+ * behind a menu now, and the two money columns share one cell.
+ */
+test('the table fits without forcing a horizontal scroll', function () {
+    Booking::factory()->for($this->hall)->confirmed()->create();
+
+    $html = Livewire::test('pages::admin.bookings')->html();
+
+    expect($html)->not->toContain('min-w-4xl')
+        // Total and balance read as one fact and share a column.
+        ->and($html)->toContain('Amount')
+        ->and($html)->not->toContain('>Balance</th>');
+});
+
+test('every row offers a way into the full record', function () {
+    $booking = Booking::factory()->for($this->hall)->create(['guest_name' => 'Juan dela Cruz']);
+
+    Livewire::test('pages::admin.bookings')
+        ->assertSee('View')
+        ->call('viewBooking', $booking->id)
+        ->assertSet('viewing', $booking->id)
+        // Everything staff ring a guest about, in one place.
+        ->assertSee($booking->reference)
+        ->assertSee('Juan dela Cruz')
+        ->assertSee($booking->guest_phone)
+        ->assertSee($booking->guest_email)
+        ->assertSee('Booked as a guest, without an account.');
+});
+
+test('a booking made from an account says so', function () {
+    $user = User::factory()->create();
+    $booking = Booking::factory()->for($this->hall)->create(['user_id' => $user->id]);
+
+    Livewire::test('pages::admin.bookings')
+        ->call('viewBooking', $booking->id)
+        ->assertSee('Booked from a signed-in account.');
+});
+
+test('a staff note shows in the detail panel', function () {
+    $booking = Booking::factory()->for($this->hall)->create(['admin_note' => 'Guest asked for extra chairs.']);
+
+    Livewire::test('pages::admin.bookings')
+        ->call('viewBooking', $booking->id)
+        ->assertSee('Staff note')
+        ->assertSee('Guest asked for extra chairs.');
+});
+
 test('an admin confirms a pending booking', function () {
     $booking = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Pending]);
 

@@ -461,41 +461,57 @@ class extends Component {
                     } }}
             </p>
         @else
+            {{-- No `min-w-*`: the table is sized to fit rather than forced past the
+                 viewport. What used to make it overflow was six wide columns plus a row
+                 of side-by-side action buttons — the money columns are now one stacked
+                 cell, and the actions live behind a menu. --}}
             <div class="overflow-x-auto">
-                <table class="w-full min-w-4xl text-left text-sm">
+                <table class="w-full text-left text-sm">
                     <thead class="border-b border-zinc-200 text-xs uppercase tracking-wider text-zinc-500">
                         <tr>
-                            <th scope="col" class="px-6 py-3 font-semibold">{{ __('Reference') }}</th>
-                            <th scope="col" class="px-6 py-3 font-semibold">{{ __('Guest') }}</th>
-                            <th scope="col" class="px-6 py-3 font-semibold">
+                            <th scope="col" class="px-4 py-3 font-semibold">{{ __('Reference') }}</th>
+                            <th scope="col" class="px-4 py-3 font-semibold">{{ __('Guest') }}</th>
+                            {{-- The venue and its dates matter less than the money and the
+                                 status, so this is the column that gives way on a narrow
+                                 screen; it is repeated in full in the detail panel. --}}
+                            <th scope="col" class="hidden px-4 py-3 font-semibold lg:table-cell">
                                 {{ match ($type) {
                                     'rooms' => __('Room & stay'),
                                     'catering' => __('Package & event'),
                                     default => __('Hall & date'),
                                 } }}
                             </th>
-                            <th scope="col" class="px-6 py-3 text-right font-semibold">{{ __('Total') }}</th>
-                            <th scope="col" class="px-6 py-3 text-right font-semibold">{{ __('Balance') }}</th>
-                            <th scope="col" class="px-6 py-3 font-semibold">{{ __('Status') }}</th>
-                            <th scope="col" class="px-6 py-3 text-right font-semibold">{{ __('Actions') }}</th>
+                            <th scope="col" class="px-4 py-3 text-right font-semibold">{{ __('Amount') }}</th>
+                            <th scope="col" class="px-4 py-3 font-semibold">{{ __('Status') }}</th>
+                            <th scope="col" class="px-4 py-3 text-right font-semibold">{{ __('Actions') }}</th>
                         </tr>
                     </thead>
 
                     <tbody class="divide-y divide-zinc-100">
                         @foreach ($this->bookings as $row)
                             <tr wire:key="booking-{{ $type }}-{{ $row->id }}" class="transition-colors hover:bg-zinc-50">
-                                <td class="whitespace-nowrap px-6 py-4">
+                                <td class="whitespace-nowrap px-4 py-4">
                                     <button type="button" wire:click="viewBooking({{ $row->id }})" class="font-medium text-brand-600 hover:text-brand-700">
                                         {{ $row->reference }}
                                     </button>
                                 </td>
 
-                                <td class="px-6 py-4">
+                                <td class="px-4 py-4">
                                     <span class="block text-zinc-900">{{ $row->guest_name }}</span>
                                     <span class="block text-xs text-zinc-500">{{ $row->guest_phone }}</span>
+
+                                    {{-- What the hidden column would have said, kept within
+                                         reach on the narrow screens that hide it. --}}
+                                    <span class="mt-1 block text-xs text-zinc-500 lg:hidden">
+                                        {{ match ($type) {
+                                            'rooms' => $row->room->name,
+                                            'catering' => $row->package->name,
+                                            default => $row->hall->name,
+                                        } }}
+                                    </span>
                                 </td>
 
-                                <td class="whitespace-nowrap px-6 py-4">
+                                <td class="hidden whitespace-nowrap px-4 py-4 lg:table-cell">
                                     <span class="block text-zinc-900">
                                         {{ match ($type) {
                                             'rooms' => $row->room->name,
@@ -525,50 +541,80 @@ class extends Component {
                                     </span>
                                 </td>
 
-                                <td class="whitespace-nowrap px-6 py-4 text-right font-medium text-zinc-900">₱{{ number_format($row->total) }}</td>
+                                {{-- Total and what is still owed read as one fact, so they
+                                     share a cell rather than costing two columns. --}}
+                                <td class="whitespace-nowrap px-4 py-4 text-right">
+                                    <span class="block font-medium text-zinc-900">₱{{ number_format($row->total) }}</span>
 
-                                <td class="whitespace-nowrap px-6 py-4 text-right">
                                     @if ($row->balance === 0)
-                                        <span class="text-xs font-semibold text-emerald-700">{{ __('Paid in full') }}</span>
+                                        <span class="block text-xs font-semibold text-emerald-700">{{ __('Paid in full') }}</span>
                                     @elseif ($row->balance_settled_at)
-                                        <span class="text-xs font-semibold text-emerald-700">{{ __('Settled') }}</span>
+                                        <span class="block text-xs font-semibold text-emerald-700">{{ __('Settled') }}</span>
                                     @else
-                                        <span class="font-medium text-amber-700">₱{{ number_format($row->balance) }}</span>
+                                        <span class="block text-xs font-semibold text-amber-700">
+                                            {{ __('₱:balance due', ['balance' => number_format($row->balance)]) }}
+                                        </span>
                                     @endif
                                 </td>
 
-                                <td class="whitespace-nowrap px-6 py-4">
+                                <td class="whitespace-nowrap px-4 py-4">
                                     <span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $row->status->classes() }}">
                                         {{ $row->status->shortLabel() }}
                                     </span>
                                 </td>
 
-                                <td class="whitespace-nowrap px-6 py-4 text-right">
-                                    <div class="flex justify-end gap-2">
-                                        @foreach ($row->status->transitions() as $target)
-                                            <button
-                                                type="button"
-                                                wire:key="move-{{ $type }}-{{ $row->id }}-{{ $target->value }}"
-                                                wire:click="moveTo({{ $row->id }}, '{{ $target->value }}')"
-                                                @class([
-                                                    'rounded-lg px-3 py-1.5 text-xs font-semibold transition',
-                                                    'bg-brand-600 text-white hover:bg-brand-700' => $target === BookingStatus::Confirmed,
-                                                    'border border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50' => $target !== BookingStatus::Confirmed,
-                                                ])
-                                            >
-                                                {{ __('Mark :status', ['status' => strtolower($target->shortLabel())]) }}
-                                            </button>
-                                        @endforeach
+                                {{-- One button and a menu, rather than up to three buttons
+                                     side by side. The width of this cell is what pushed the
+                                     table past the viewport, and the moves it offers vary by
+                                     status, so the column could never settle on a width. --}}
+                                <td class="whitespace-nowrap px-4 py-4 text-right">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <flux:button
+                                            size="sm"
+                                            variant="ghost"
+                                            icon="eye"
+                                            wire:click="viewBooking({{ $row->id }})"
+                                        >
+                                            {{ __('View') }}
+                                        </flux:button>
 
-                                        @if ($row->hasOutstandingBalance() && $row->status === BookingStatus::Confirmed)
-                                            <button
-                                                type="button"
-                                                wire:click="settleBalance({{ $row->id }})"
-                                                class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100"
-                                            >
-                                                {{ __('Balance paid') }}
-                                            </button>
-                                        @endif
+                                        <flux:dropdown position="bottom" align="end">
+                                            <flux:button
+                                                size="sm"
+                                                variant="ghost"
+                                                icon="ellipsis-horizontal"
+                                                :aria-label="__('Actions for :reference', ['reference' => $row->reference])"
+                                            />
+
+                                            <flux:menu>
+                                                @foreach ($row->status->transitions() as $target)
+                                                    <flux:menu.item
+                                                        wire:key="move-{{ $type }}-{{ $row->id }}-{{ $target->value }}"
+                                                        wire:click="moveTo({{ $row->id }}, '{{ $target->value }}')"
+                                                        :icon="match ($target) {
+                                                            BookingStatus::Confirmed => 'check-circle',
+                                                            BookingStatus::Completed => 'flag',
+                                                            BookingStatus::Cancelled => 'x-circle',
+                                                            default => 'arrow-path',
+                                                        }"
+                                                        :variant="$target === BookingStatus::Cancelled ? 'danger' : null"
+                                                    >
+                                                        {{ __('Mark :status', ['status' => strtolower($target->shortLabel())]) }}
+                                                    </flux:menu.item>
+                                                @endforeach
+
+                                                @if ($row->hasOutstandingBalance() && $row->status === BookingStatus::Confirmed)
+                                                    <flux:menu.separator />
+
+                                                    <flux:menu.item
+                                                        icon="banknotes"
+                                                        wire:click="settleBalance({{ $row->id }})"
+                                                    >
+                                                        {{ __('Balance paid') }}
+                                                    </flux:menu.item>
+                                                @endif
+                                            </flux:menu>
+                                        </flux:dropdown>
                                     </div>
                                 </td>
                             </tr>
@@ -593,12 +639,16 @@ class extends Component {
                 $isRoom = $this->showingRooms();
                 $isCatering = $this->showingCatering();
 
-                $when = match (true) {
+                // Grouped rather than one long list: staff on the phone are looking for
+                // one of three things — who the guest is, what they booked, or what they
+                // have paid — and a flat list of fifteen rows hides all three equally.
+                $booked = match (true) {
                     $isRoom => [
                         __('Stay') => $b->stayLabel(),
                         __('Check-in') => $b->starts_at->format('l, F j, Y \a\t g:i A'),
                         __('Check-out') => $b->ends_at->format('l, F j, Y \a\t g:i A'),
                         __('Arrive by') => $b->arriveBy()->format('g:i A'),
+                        trans_choice('{1} Day held|[2,*] Days held', $b->days) => \App\Support\DateList::label($b->dateList()),
                     ],
                     $isCatering => [
                         trans_choice('{1} Event date|[2,*] Event dates', $b->days) => \App\Support\DateList::label($b->dateList()),
@@ -611,14 +661,11 @@ class extends Component {
                         trans_choice('{1} Date|[2,*] Dates', $b->days) => \App\Support\DateList::label($b->dateList()),
                         __('Days') => number_format($b->days),
                         $b->days > 1 ? __('Time each day') : __('Time') => sprintf('%d:00 %s – %d:00 %s', $b->start_hour % 12 ?: 12, $b->start_hour >= 12 ? 'PM' : 'AM', $b->end_hour % 12 ?: 12, $b->end_hour >= 12 ? 'PM' : 'AM'),
+                        __('Skirting') => $b->include_skirting ? __('Included') : __('Not included'),
                     ],
                 };
 
-                $rows = [
-                    __('Guest') => $b->guest_name,
-                    __('Phone') => $b->guest_phone,
-                    __('Email') => $b->guest_email,
-                    ...$when,
+                $money = [
                     __('Total') => '₱'.number_format($b->total),
                     __('Paid') => '₱'.number_format($b->amountPaid()),
                     __('Balance') => $b->balance === 0
@@ -626,51 +673,107 @@ class extends Component {
                         : ($b->balance_settled_at
                             ? __('Settled :date', ['date' => $b->balance_settled_at->format('M j, Y')])
                             : '₱'.number_format($b->balance)),
-                    __('Booked on') => $b->created_at->format('M j, Y g:i A'),
-                    // What a guest quotes when they ring up about a payment, and what the
-                    // resort checks against its PayMongo dashboard.
                     __('Payment') => $b->payment_status->label()
                         .($b->payment_method ? ' · '.strtoupper($b->payment_method) : ''),
+                    // What a guest quotes when they ring up about a payment, and what the
+                    // resort checks against its PayMongo dashboard.
                     ...($b->payment_reference ? [__('Payment reference') => $b->payment_reference] : []),
+                    ...($b->paid_at ? [__('Paid on') => $b->paid_at->format('M j, Y g:i A')] : []),
+                    __('Booked on') => $b->created_at->format('M j, Y g:i A'),
+                ];
+
+                $sections = [
+                    __('Booking') => $booked,
+                    __('Payment') => $money,
                 ];
             @endphp
 
             <div class="space-y-6">
-                <div>
-                    <flux:heading size="lg">{{ $b->reference }}</flux:heading>
-                    <flux:text class="mt-1">
-                        {{ match (true) {
-                            $isRoom => $b->room->name,
-                            $isCatering => $b->package->name,
-                            default => $b->hall->name,
-                        } }}
-                    </flux:text>
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <flux:heading size="lg">{{ $b->reference }}</flux:heading>
+                        <flux:text class="mt-1">
+                            {{ match (true) {
+                                $isRoom => $b->room->name,
+                                $isCatering => $b->package->name,
+                                default => $b->hall->name,
+                            } }}
+                        </flux:text>
+                    </div>
+
+                    <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold {{ $b->status->classes() }}">
+                        {{ $b->status->shortLabel() }}
+                    </span>
                 </div>
 
-                <dl class="divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
-                    @foreach ($rows as $label => $value)
-                        <div class="flex justify-between gap-6 py-3" wire:key="detail-{{ $loop->index }}">
-                            <dt class="text-zinc-500">{{ $label }}</dt>
-                            <dd class="text-right font-medium text-zinc-900">{{ $value }}</dd>
-                        </div>
-                    @endforeach
-                </dl>
+                {{-- The guest comes first and gets its own block: phone and email are what
+                     staff actually reach for, and they are dialable and clickable here
+                     rather than something to copy out by hand. --}}
+                <div class="rounded-lg bg-zinc-50 p-4">
+                    <p class="text-base font-semibold text-zinc-900">{{ $b->guest_name }}</p>
 
-                <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $b->status->classes() }}">
-                        {{ $b->status->label() }}
-                    </span>
+                    <div class="mt-2 space-y-1 text-sm">
+                        <a href="tel:{{ $b->guest_phone }}" class="block text-brand-600 hover:text-brand-700">
+                            {{ $b->guest_phone }}
+                        </a>
+                        <a href="mailto:{{ $b->guest_email }}" class="block break-all text-brand-600 hover:text-brand-700">
+                            {{ $b->guest_email }}
+                        </a>
+                    </div>
 
-                    @foreach ($b->status->transitions() as $target)
-                        <button
-                            type="button"
-                            wire:key="detail-move-{{ $target->value }}"
-                            wire:click="moveTo({{ $b->id }}, '{{ $target->value }}')"
-                            class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50"
-                        >
-                            {{ __('Mark :status', ['status' => strtolower($target->shortLabel())]) }}
-                        </button>
-                    @endforeach
+                    <p class="mt-2 text-xs text-zinc-500">
+                        {{ $b->user_id
+                            ? __('Booked from a signed-in account.')
+                            : __('Booked as a guest, without an account.') }}
+                    </p>
+                </div>
+
+                @foreach ($sections as $heading => $rows)
+                    <div wire:key="section-{{ $loop->index }}">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">{{ $heading }}</p>
+
+                        <dl class="mt-2 divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
+                            @foreach ($rows as $label => $value)
+                                <div class="flex justify-between gap-6 py-2.5" wire:key="detail-{{ $loop->parent->index }}-{{ $loop->index }}">
+                                    <dt class="shrink-0 text-zinc-500">{{ $label }}</dt>
+                                    <dd class="text-right font-medium text-zinc-900">{{ $value }}</dd>
+                                </div>
+                            @endforeach
+                        </dl>
+                    </div>
+                @endforeach
+
+                @if ($b->admin_note)
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">{{ __('Staff note') }}</p>
+                        <p class="mt-2 text-sm text-zinc-700">{{ $b->admin_note }}</p>
+                    </div>
+                @endif
+
+                {{-- The status is spelled out in full here — "Awaiting payment
+                     confirmation" rather than the table's one-word chip — because this is
+                     where someone reads it before deciding what to do about it. --}}
+                <div class="space-y-3 border-t border-zinc-200 pt-4">
+                    <p class="text-sm text-zinc-600">{{ $b->status->label() }}</p>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        @foreach ($b->status->transitions() as $target)
+                            <flux:button
+                                size="sm"
+                                wire:key="detail-move-{{ $target->value }}"
+                                wire:click="moveTo({{ $b->id }}, '{{ $target->value }}')"
+                                :variant="$target === BookingStatus::Confirmed ? 'primary' : ($target === BookingStatus::Cancelled ? 'danger' : 'filled')"
+                            >
+                                {{ __('Mark :status', ['status' => strtolower($target->shortLabel())]) }}
+                            </flux:button>
+                        @endforeach
+
+                        @if ($b->hasOutstandingBalance() && $b->status === BookingStatus::Confirmed)
+                            <flux:button size="sm" variant="filled" icon="banknotes" wire:click="settleBalance({{ $b->id }})">
+                                {{ __('Balance paid') }}
+                            </flux:button>
+                        @endif
+                    </div>
                 </div>
             </div>
         @endif
