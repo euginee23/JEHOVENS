@@ -3,12 +3,15 @@
 namespace App\Models\Concerns;
 
 use App\Enums\BookingStatus;
+use App\Enums\PaymentKind;
 use App\Enums\PaymentStatus;
+use App\Models\Payment;
 use App\Notifications\NewReservationAlert;
 use App\Notifications\ReservationBalanceSettled;
 use App\Notifications\ReservationReceived;
 use App\Notifications\ReservationStatusChanged;
 use App\Support\ReservationSummary;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Notification as Notifications;
 
@@ -92,6 +95,16 @@ trait ManagesReservationLifecycle
     }
 
     /**
+     * The money actually received against this reservation, oldest first.
+     *
+     * @return MorphMany<Payment, $this>
+     */
+    public function payments(): MorphMany
+    {
+        return $this->morphMany(Payment::class, 'payable')->orderBy('received_at')->orderBy('id');
+    }
+
+    /**
      * Whether the guest still owes the resort money.
      */
     public function hasOutstandingBalance(): bool
@@ -131,6 +144,16 @@ trait ManagesReservationLifecycle
 
         if (! $this->save()) {
             return false;
+        }
+
+        // Confirming is the moment the downpayment counts as verified, whether PayMongo
+        // or a member of staff did it.
+        if ($status === BookingStatus::Confirmed) {
+            $this->recordDownpaymentReceived();
+        }
+
+        if ($settledNow) {
+            $this->recordBalanceReceived();
         }
 
         // `$notify` is off when the caller is already telling the guest something better
@@ -183,9 +206,66 @@ trait ManagesReservationLifecycle
             return false;
         }
 
+        $this->recordBalanceReceived();
+
         $this->notifyGuest(new ReservationBalanceSettled($this->toSummary()));
 
         return true;
+    }
+
+    /**
+     * Write the downpayment into the payments ledger, once.
+     *
+     * Once, because a booking can be confirmed more than once — cancelled, reinstated and
+     * confirmed again — and the guest only paid the one downpayment. A PayMongo payment
+     * carries its own method, reference and time; one confirmed by hand is dated now and
+     * credited to whoever is signed in.
+     */
+    protected function recordDownpaymentReceived(): void
+    {
+        $amount = $this->amountPaid();
+
+        if ($amount <= 0 || $this->payments()->where('kind', PaymentKind::Downpayment)->exists()) {
+            return;
+        }
+
+        $this->payments()->create([
+            'kind' => PaymentKind::Downpayment,
+            'amount' => $amount,
+            'method' => $this->payment_method,
+            'reference' => $this->payment_reference,
+            // `paid_at` is only ever set by PayMongo, so a downpayment carrying it was
+            // verified by the gateway rather than by whoever happens to be signed in.
+            'recorded_by' => $this->paid_at === null ? $this->signedInStaffId() : null,
+            'received_at' => $this->paid_at ?? now(),
+        ]);
+    }
+
+    /**
+     * Write the settled balance into the payments ledger.
+     */
+    protected function recordBalanceReceived(): void
+    {
+        if ($this->balanceRemaining() <= 0) {
+            return;
+        }
+
+        $this->payments()->create([
+            'kind' => PaymentKind::Balance,
+            'amount' => $this->balanceRemaining(),
+            'recorded_by' => $this->signedInStaffId(),
+            'received_at' => $this->balance_settled_at ?? now(),
+        ]);
+    }
+
+    /**
+     * Whoever is signed in to the admin, to credit with a payment they recorded.
+     */
+    protected function signedInStaffId(): ?int
+    {
+        $id = auth()->id();
+
+        return is_int($id) ? $id : null;
     }
 
     /**

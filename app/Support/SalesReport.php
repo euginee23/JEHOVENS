@@ -5,85 +5,123 @@ namespace App\Support;
 use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\CateringOrder;
-use App\Models\Concerns\ManagesReservationLifecycle;
+use App\Models\Payment;
 use App\Models\RoomBooking;
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Model;
 
 /**
- * What the resort has sold and collected over a stretch of time.
+ * What the resort has actually collected, read from the payments ledger.
  *
- * The one place the revenue rule lives, so the dashboard tile and the Sales page cannot
- * drift apart. Only Confirmed and Completed reservations count: a pending one is money
- * not yet verified, and a cancelled one is not going ahead. Completed has to be in here —
- * leaving it out made a booking's money vanish from revenue the moment staff marked it
- * done, which is the opposite of what finishing a booking means.
+ * The one place the sales rule lives, so the dashboard tile and the Sales page cannot
+ * drift apart. A sale is money received — a verified downpayment or a balance recorded as
+ * paid — counted on the day it arrived, not the day the booking was placed. That is what
+ * lets the resort say what came in today, and it means a booking's money stays counted
+ * whatever happens to its status afterwards.
  *
- * Reservations are counted by when they were placed, as the dashboard always has.
- *
- * @phpstan-type SalesRow array{bookings: int, sales: int, collected: int, toCollect: int}
+ * @phpstan-type ModuleTotals array{halls: int, rooms: int, catering: int, total: int}
  */
 final class SalesReport
 {
     /**
-     * Sales per reservation type and in total, for reservations placed in the window.
+     * The modules sales are split by, keyed as the admin pages key them.
      *
-     * - `sales`: the full value of what was booked
-     * - `collected`: the downpayments plus any balances recorded as paid
-     * - `toCollect`: balances still owed on bookings that are going ahead
-     *
-     * The tables disagree on the name of the column holding what the guest paid up front,
-     * as {@see ManagesReservationLifecycle} explains, so each type names its own.
-     *
-     * @return array{halls: SalesRow, rooms: SalesRow, catering: SalesRow, total: SalesRow}
+     * @var array<string, class-string>
      */
-    public static function between(CarbonInterface $from, CarbonInterface $until): array
+    public const MODULES = [
+        'halls' => Booking::class,
+        'rooms' => RoomBooking::class,
+        'catering' => CateringOrder::class,
+    ];
+
+    /**
+     * Money collected per module and in total, optionally within a window.
+     *
+     * @return ModuleTotals
+     */
+    public static function collected(?CarbonInterface $from = null, ?CarbonInterface $until = null): array
     {
-        $rows = [
-            'halls' => self::summarise(Booking::query(), 'coalesce(sum(downpayment), 0) as paid', $from, $until),
-            'rooms' => self::summarise(RoomBooking::query(), 'coalesce(sum(amount_paid), 0) as paid', $from, $until),
-            'catering' => self::summarise(CateringOrder::query(), 'coalesce(sum(downpayment), 0) as paid', $from, $until),
-        ];
+        $sums = self::payments($from, $until)
+            ->toBase()
+            ->selectRaw('payable_type, coalesce(sum(amount), 0) as collected')
+            ->groupBy('payable_type')
+            ->pluck('collected', 'payable_type');
 
-        $rows['total'] = [
-            'bookings' => array_sum(array_column($rows, 'bookings')),
-            'sales' => array_sum(array_column($rows, 'sales')),
-            'collected' => array_sum(array_column($rows, 'collected')),
-            'toCollect' => array_sum(array_column($rows, 'toCollect')),
+        return [
+            'halls' => (int) ($sums[Booking::class] ?? 0),
+            'rooms' => (int) ($sums[RoomBooking::class] ?? 0),
+            'catering' => (int) ($sums[CateringOrder::class] ?? 0),
+            'total' => (int) $sums->sum(),
         ];
-
-        return $rows;
     }
 
     /**
-     * One reservation type's figures, in a single query.
+     * Money collected in each day, month or year of a window, oldest first.
      *
-     * @template TModel of Model
+     * Bucketed in PHP rather than with a SQL date function, which MySQL and the SQLite
+     * the tests run on spell differently. A resort's payments for a year fit comfortably.
      *
-     * @param  Builder<TModel>  $query
-     * @param  literal-string  $paidSum  the select summing this type's paid column, as `paid`
-     * @return SalesRow
+     * @param  'day'|'month'|'year'  $unit
+     * @return array<string, int> amount collected, keyed by the start of each bucket as Y-m-d
      */
-    private static function summarise(Builder $query, string $paidSum, CarbonInterface $from, CarbonInterface $until): array
+    public static function trend(CarbonInterface $from, CarbonInterface $until, string $unit): array
     {
-        $totals = $query
-            ->whereIn('status', [BookingStatus::Confirmed, BookingStatus::Completed])
-            ->where('created_at', '>=', $from)
-            ->where('created_at', '<=', $until)
-            ->toBase()
-            ->selectRaw('count(*) as bookings')
-            ->selectRaw('coalesce(sum(total), 0) as sales')
-            ->selectRaw($paidSum)
-            ->selectRaw('coalesce(sum(case when balance_settled_at is not null then balance else 0 end), 0) as settled')
-            ->selectRaw('coalesce(sum(case when status = ? and balance_settled_at is null then balance else 0 end), 0) as owed', [BookingStatus::Confirmed->value])
-            ->first();
+        $buckets = [];
+        $cursor = CarbonImmutable::instance($from)->startOf($unit);
 
-        return [
-            'bookings' => (int) $totals->bookings,
-            'sales' => (int) $totals->sales,
-            'collected' => (int) $totals->paid + (int) $totals->settled,
-            'toCollect' => (int) $totals->owed,
-        ];
+        while ($cursor->lessThanOrEqualTo($until)) {
+            $buckets[$cursor->toDateString()] = 0;
+            $cursor = $cursor->add(1, $unit);
+        }
+
+        foreach (self::payments($from, $until)->get(['amount', 'received_at']) as $payment) {
+            $key = $payment->received_at->startOf($unit)->toDateString();
+
+            if (array_key_exists($key, $buckets)) {
+                $buckets[$key] += $payment->amount;
+            }
+        }
+
+        return $buckets;
+    }
+
+    /**
+     * Balances still owed on bookings that are going ahead, whenever they were placed.
+     */
+    public static function stillToCollect(): int
+    {
+        $owed = 0;
+
+        foreach ([Booking::query(), RoomBooking::query(), CateringOrder::query()] as $query) {
+            $owed += (int) $query
+                ->where('status', BookingStatus::Confirmed)
+                ->whereNull('balance_settled_at')
+                ->sum('balance');
+        }
+
+        return $owed;
+    }
+
+    /**
+     * The payments received within a window, or all of them.
+     *
+     * @return Builder<Payment>
+     */
+    public static function payments(?CarbonInterface $from = null, ?CarbonInterface $until = null): Builder
+    {
+        return Payment::query()
+            ->when($from, fn (Builder $query) => $query->where('received_at', '>=', $from))
+            ->when($until, fn (Builder $query) => $query->where('received_at', '<=', $until));
+    }
+
+    /**
+     * Which module a payment belongs to, from the reservation it was for.
+     */
+    public static function moduleOf(Payment $payment): string
+    {
+        $module = array_search($payment->payable_type, self::MODULES, strict: true);
+
+        return is_string($module) ? $module : 'halls';
     }
 }

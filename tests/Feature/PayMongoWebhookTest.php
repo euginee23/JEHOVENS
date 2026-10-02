@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\BookingStatus;
+use App\Enums\PaymentKind;
 use App\Enums\PaymentStatus;
 use App\Models\Booking;
 use App\Models\Hall;
@@ -99,6 +100,22 @@ test('a paid checkout confirms the booking and records the payment reference', f
         ->and($booking->paid_at)->not->toBeNull()
         // The hold is over; the booking stands on its own now.
         ->and($booking->payment_expires_at)->toBeNull();
+});
+
+test('a paid checkout writes the downpayment into the payments ledger, credited to PayMongo', function () {
+    $webhook = signedWebhook('checkout_session.payment.paid', sessionFor($this->booking));
+
+    deliverWebhook($webhook);
+    deliverWebhook($webhook);
+
+    $payment = $this->booking->payments()->sole();
+
+    expect($payment->kind)->toBe(PaymentKind::Downpayment)
+        ->and($payment->amount)->toBe($this->booking->downpayment)
+        ->and($payment->method)->toBe('gcash')
+        ->and($payment->reference)->toBe('pay_test_fake')
+        ->and($payment->recorded_by)->toBeNull()
+        ->and($payment->recordedByLabel())->toBe('PayMongo');
 });
 
 test('a paid checkout emails the guest their receipt and alerts the resort', function () {

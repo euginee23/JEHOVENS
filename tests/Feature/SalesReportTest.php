@@ -3,133 +3,170 @@
 use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\CateringOrder;
-use App\Models\Hall;
+use App\Models\Payment;
 use App\Models\RoomBooking;
 use App\Models\User;
 use App\Support\SalesReport;
+use Illuminate\Database\Eloquent\Model;
 use Livewire\Livewire;
 
+/**
+ * A payment of the given amount against a reservation, received at the given moment.
+ */
+function receivedPayment(Model $reservation, int $amount, ?DateTimeInterface $at = null): Payment
+{
+    return Payment::factory()->for($reservation, 'payable')->create([
+        'amount' => $amount,
+        'received_at' => $at ?? now(),
+    ]);
+}
+
 beforeEach(function () {
-    // ₱13,000 total, ₱6,500 down, ₱6,500 balance for every hall booking below.
-    $this->hall = Hall::factory()->create(['rent_price' => 8000, 'skirting_price' => 5000]);
-    $this->hallBooking = fn (array $attributes = []) => Booking::factory()->for($this->hall)->create([
-        'include_skirting' => true,
-        'hours' => 4,
-        ...$attributes,
+    $this->travelTo(now()->setDate(2026, 6, 15)->setTime(10, 0));
+});
+
+test('collected splits the money received by module', function () {
+    receivedPayment(Booking::factory()->confirmed()->create(), 6_500);
+    receivedPayment(Booking::factory()->confirmed()->create(), 3_000);
+    receivedPayment(RoomBooking::factory()->confirmed()->create(), 1_200);
+    receivedPayment(CateringOrder::factory()->confirmed()->create(), 9_000);
+
+    expect(SalesReport::collected())->toBe([
+        'halls' => 9_500,
+        'rooms' => 1_200,
+        'catering' => 9_000,
+        'total' => 19_700,
     ]);
 });
 
-test('the report splits sales, collected and still-to-collect by type', function () {
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed]);
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'balance_settled_at' => now()]);
-    ($this->hallBooking)(['status' => BookingStatus::Completed, 'balance_settled_at' => now()]);
+/**
+ * A sale is counted the day the money arrived. A booking placed in May whose balance
+ * came in during June is part of June's sales for that balance.
+ */
+test('collected counts payments by when they were received, not when the booking was placed', function () {
+    $booking = Booking::factory()->confirmed()->create(['created_at' => now()->subMonth()]);
 
-    $room = RoomBooking::factory()->confirmed()->create();
-    $order = CateringOrder::factory()->confirmed()->create();
+    receivedPayment($booking, 6_500, now()->subMonth());
+    receivedPayment($booking, 6_500, now());
 
-    $report = SalesReport::between(now()->startOfMonth(), now()->endOfMonth());
-
-    expect($report['halls'])->toBe([
-        'bookings' => 3,
-        'sales' => 39_000,
-        // Three downpayments plus the two balances recorded as paid.
-        'collected' => 3 * 6_500 + 2 * 6_500,
-        // Only the unsettled confirmed balance is still owed.
-        'toCollect' => 6_500,
-    ]);
-
-    expect($report['rooms'])->toBe([
-        'bookings' => 1,
-        'sales' => $room->total,
-        'collected' => $room->amount_paid,
-        'toCollect' => $room->balance,
-    ]);
-
-    expect($report['catering'])->toBe([
-        'bookings' => 1,
-        'sales' => $order->total,
-        'collected' => $order->downpayment,
-        'toCollect' => $order->balance,
-    ]);
-
-    expect($report['total']['sales'])->toBe(39_000 + $room->total + $order->total)
-        ->and($report['total']['bookings'])->toBe(5);
+    expect(SalesReport::collected(now()->startOfMonth(), now()->endOfMonth())['total'])->toBe(6_500)
+        ->and(SalesReport::collected()['total'])->toBe(13_000);
 });
 
-test('pending and cancelled reservations are left out', function () {
-    ($this->hallBooking)(['status' => BookingStatus::Pending]);
-    ($this->hallBooking)(['status' => BookingStatus::Cancelled]);
-    RoomBooking::factory()->create(['status' => BookingStatus::Pending]);
-    CateringOrder::factory()->cancelled()->create();
+test('the window includes both of its edges and nothing past them', function () {
+    $booking = Booking::factory()->confirmed()->create();
 
-    expect(SalesReport::between(now()->startOfMonth(), now()->endOfMonth())['total'])->toBe([
-        'bookings' => 0,
-        'sales' => 0,
-        'collected' => 0,
-        'toCollect' => 0,
-    ]);
+    receivedPayment($booking, 1, now()->setDate(2026, 5, 31)->endOfDay());
+    receivedPayment($booking, 10, now()->setDate(2026, 6, 1)->startOfDay());
+    receivedPayment($booking, 100, now()->setDate(2026, 6, 30)->endOfDay());
+    receivedPayment($booking, 1_000, now()->setDate(2026, 7, 1)->startOfDay());
+
+    expect(SalesReport::collected(now()->startOfMonth(), now()->endOfMonth())['total'])->toBe(110);
 });
 
-test('the report only counts reservations placed inside the window', function () {
-    $this->travelTo(now()->setDate(2026, 6, 15));
+test('money stays counted when its booking is later cancelled', function () {
+    $booking = Booking::factory()->confirmed()->create();
+    receivedPayment($booking, 6_500);
 
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'created_at' => now()->setDate(2026, 5, 31)->endOfDay()]);
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'created_at' => now()->setDate(2026, 6, 1)->startOfDay()]);
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'created_at' => now()->setDate(2026, 6, 30)->endOfDay()]);
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'created_at' => now()->setDate(2026, 7, 1)->startOfDay()]);
+    $booking->transitionTo(BookingStatus::Cancelled);
 
-    $june = SalesReport::between(now()->startOfMonth(), now()->endOfMonth());
+    expect(SalesReport::collected()['total'])->toBe(6_500);
+});
 
-    expect($june['total']['bookings'])->toBe(2);
+test('the trend fills every day of the window, including the empty ones', function () {
+    $booking = Booking::factory()->confirmed()->create();
+
+    receivedPayment($booking, 500, now()->setDate(2026, 6, 3)->setTime(9, 0));
+    receivedPayment($booking, 700, now()->setDate(2026, 6, 3)->setTime(17, 0));
+    receivedPayment($booking, 900, now()->setDate(2026, 6, 20));
+
+    $trend = SalesReport::trend(now()->startOfMonth(), now()->endOfMonth(), 'day');
+
+    expect($trend)->toHaveCount(30)
+        ->and($trend['2026-06-03'])->toBe(1_200)
+        ->and($trend['2026-06-20'])->toBe(900)
+        ->and($trend['2026-06-04'])->toBe(0);
+});
+
+test('the trend can be drawn by month', function () {
+    $booking = Booking::factory()->confirmed()->create();
+
+    receivedPayment($booking, 500, now()->setDate(2026, 2, 10));
+    receivedPayment($booking, 700, now()->setDate(2026, 2, 25));
+
+    $trend = SalesReport::trend(now()->startOfYear(), now()->endOfYear(), 'month');
+
+    expect($trend)->toHaveCount(12)
+        ->and($trend['2026-02-01'])->toBe(1_200)
+        ->and($trend['2026-03-01'])->toBe(0);
+});
+
+test('still to collect sums unsettled balances on confirmed bookings only', function () {
+    $owing = Booking::factory()->confirmed()->create();
+    Booking::factory()->confirmed()->create(['balance_settled_at' => now()]);
+    Booking::factory()->create(['status' => BookingStatus::Pending]);
+    Booking::factory()->cancelled()->create();
+
+    expect(SalesReport::stillToCollect())->toBe($owing->balance);
 });
 
 test('the sales page needs a signed-in admin', function () {
     $this->get(route('admin.sales'))->assertRedirect(route('login'));
 });
 
-test('the sales page shows the totals for this month by default', function () {
+test('the sales page shows today, this month, this year and all time', function () {
     $this->actingAs(User::factory()->create());
 
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed]);
+    $booking = Booking::factory()->confirmed()->create();
 
-    $this->get(route('admin.sales'))
-        ->assertOk()
-        ->assertSee('Gross sales')
-        ->assertSee('₱13,000')
-        ->assertSee('₱6,500');
-});
-
-test('switching the period changes the figures', function () {
-    $this->actingAs(User::factory()->create());
-    $this->travelTo(now()->setDate(2026, 6, 15));
-
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'created_at' => now()->setDate(2026, 5, 10)]);
+    receivedPayment($booking, 1_000, now());
+    receivedPayment($booking, 2_000, now()->setDate(2026, 6, 2));
+    receivedPayment($booking, 4_000, now()->setDate(2026, 2, 2));
+    receivedPayment($booking, 8_000, now()->setDate(2025, 12, 2));
 
     Livewire::test('pages::admin.sales')
-        ->assertSet('period', 'this-month')
-        ->tap(fn ($component) => expect($component->get('report')['total']['bookings'])->toBe(0))
-        ->call('showPeriod', 'last-month')
-        ->tap(fn ($component) => expect($component->get('report')['total']['bookings'])->toBe(1))
-        ->call('showPeriod', 'this-year')
-        ->assertSee('By month')
-        ->tap(fn ($component) => expect($component->get('months')['May']['bookings'])->toBe(1));
+        ->assertSet('headline', [
+            'total' => 15_000,
+            'today' => 1_000,
+            'month' => 3_000,
+            'year' => 7_000,
+        ])
+        ->assertSee("Today's sales")
+        ->assertSee('Sales per module')
+        ->assertSee('Daily sales');
 });
 
-test('a custom range counts what was placed between the two days', function () {
+test('the period changes the breakdown and the payments listed', function () {
     $this->actingAs(User::factory()->create());
 
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'created_at' => now()->subDays(40)]);
-    ($this->hallBooking)(['status' => BookingStatus::Confirmed, 'created_at' => now()->subDays(5)]);
+    $booking = Booking::factory()->confirmed()->create(['guest_name' => 'Juan dela Cruz']);
+    receivedPayment($booking, 2_500, now()->setDate(2026, 3, 10));
 
-    $component = Livewire::test('pages::admin.sales')
+    Livewire::test('pages::admin.sales')
+        ->assertSet('modules.total', 0)
+        ->assertSee('No payments received in this period.')
+        ->call('showPeriod', 'this-year')
+        ->assertSet('modules.halls', 2_500)
+        ->assertSee('Monthly sales')
+        ->assertSee($booking->reference)
+        ->assertSee('Juan dela Cruz')
+        ->call('showPeriod', 'today')
+        ->assertSet('modules.total', 0);
+});
+
+test('a custom range is read in either order', function () {
+    $this->actingAs(User::factory()->create());
+
+    receivedPayment(Booking::factory()->confirmed()->create(), 2_500, now()->subDays(5));
+
+    Livewire::test('pages::admin.sales')
         ->call('showPeriod', 'custom')
-        ->set('from', now()->subDays(45)->toDateString())
-        ->set('until', now()->toDateString());
-
-    expect($component->get('report')['total']['bookings'])->toBe(2);
-
-    // Entered back to front, the range is turned round rather than coming up empty.
-    $component->set('from', now()->toDateString())->set('until', now()->subDays(10)->toDateString());
-
-    expect($component->get('report')['total']['bookings'])->toBe(1);
+        ->set('from', now()->subDays(10)->toDateString())
+        ->set('until', now()->toDateString())
+        ->assertSet('modules.total', 2_500)
+        ->set('from', now()->toDateString())
+        ->set('until', now()->subDays(10)->toDateString())
+        ->assertSet('modules.total', 2_500)
+        ->set('until', 'not-a-date')
+        ->assertOk();
 });

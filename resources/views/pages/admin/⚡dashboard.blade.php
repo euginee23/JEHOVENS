@@ -46,14 +46,14 @@ class extends Component {
     }
 
     /**
-     * Money actually collected on reservations placed this month.
+     * Money actually received this month, whatever month the booking was placed in.
      *
      * The rule lives in {@see SalesReport}, shared with the Sales page.
      */
     #[Computed]
     public function revenue(): int
     {
-        return SalesReport::between(now()->startOfMonth(), now())['total']['collected'];
+        return SalesReport::collected(now()->startOfMonth(), now()->endOfMonth())['total'];
     }
 
     /**

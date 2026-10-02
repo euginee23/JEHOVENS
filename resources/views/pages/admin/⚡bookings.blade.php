@@ -256,7 +256,7 @@ class extends Component {
 
         $model = $this->model();
 
-        return $model::with([$this->venueRelation(), 'dates'])->find($this->viewing);
+        return $model::with([$this->venueRelation(), 'dates', 'payments.recorder'])->find($this->viewing);
     }
 
     /**
@@ -796,6 +796,31 @@ class extends Component {
                             </dl>
                         </div>
                     @endforeach
+                </div>
+
+                {{-- The money that has actually come in for this booking, as the Sales
+                     page counts it. --}}
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">{{ __('Payments received') }}</p>
+
+                    @if ($b->payments->isEmpty())
+                        <p class="mt-2 text-sm text-zinc-500">{{ __('No payment has been received yet.') }}</p>
+                    @else
+                        <ul class="mt-2 divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
+                            @foreach ($b->payments as $payment)
+                                <li wire:key="detail-payment-{{ $payment->id }}" class="flex items-baseline justify-between gap-4 py-2.5">
+                                    <span class="min-w-0">
+                                        <span class="font-medium text-zinc-900">{{ $payment->kind->label() }}</span>
+                                        <span class="block text-xs text-zinc-500">
+                                            {{ $payment->received_at->format('M j, Y g:i A') }}
+                                            · {{ $payment->method ? strtoupper($payment->method).' · ' : '' }}{{ $payment->recordedByLabel() }}
+                                        </span>
+                                    </span>
+                                    <span class="shrink-0 font-medium text-zinc-900">₱{{ number_format($payment->amount) }}</span>
+                                </li>
+                            @endforeach
+                        </ul>
+                    @endif
                 </div>
 
                 @if ($b->admin_note)

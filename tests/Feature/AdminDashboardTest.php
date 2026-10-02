@@ -4,6 +4,7 @@ use App\Enums\BookingStatus;
 use App\Models\Booking;
 use App\Models\CateringOrder;
 use App\Models\Hall;
+use App\Models\Payment;
 use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\User;
@@ -40,17 +41,15 @@ test('awaiting payment counts pending reservations across all three types', func
     expect(Livewire::test('pages::admin.dashboard')->get('awaitingPayment'))->toBe(4);
 });
 
-test('revenue counts money actually collected this month', function () {
+test('revenue counts the money received this month', function () {
     $hall = Hall::factory()->create(['rent_price' => 8000, 'skirting_price' => 5000]);
 
-    // Confirmed: ₱13,000 total, ₱6,500 down.
-    Booking::factory()->for($hall)->confirmed()->create(['include_skirting' => true, 'hours' => 4]);
+    // Confirmed by staff: the ₱6,500 downpayment is verified now.
+    $confirmed = Booking::factory()->for($hall)->create(['include_skirting' => true, 'hours' => 4]);
+    $confirmed->transitionTo(BookingStatus::Confirmed);
 
     // Pending money has not arrived, so it must not be counted.
     Booking::factory()->for($hall)->create(['status' => BookingStatus::Pending, 'include_skirting' => true, 'hours' => 4]);
-
-    // Cancelled likewise.
-    Booking::factory()->for($hall)->cancelled()->create(['include_skirting' => true, 'hours' => 4]);
 
     expect(Livewire::test('pages::admin.dashboard')->get('revenue'))->toBe(6_500);
 });
@@ -62,20 +61,21 @@ test('revenue counts money actually collected this month', function () {
 test('revenue keeps counting a booking once it is completed, balance included', function () {
     $hall = Hall::factory()->create(['rent_price' => 8000, 'skirting_price' => 5000]);
 
-    $booking = Booking::factory()->for($hall)->confirmed()->create([
+    $booking = Booking::factory()->for($hall)->create([
         'include_skirting' => true,
         'hours' => 4,
         'start_date' => today()->subDay()->toDateString(),
     ]);
 
+    $booking->transitionTo(BookingStatus::Confirmed);
     expect($booking->transitionTo(BookingStatus::Completed))->toBeTrue();
 
     // Completing settles the balance, so the full ₱13,000 has been collected.
     expect(Livewire::test('pages::admin.dashboard')->get('revenue'))->toBe(13_000);
 });
 
-test('revenue ignores reservations placed before this month', function () {
-    Booking::factory()->confirmed()->create(['created_at' => now()->subMonths(2)]);
+test('revenue ignores money received before this month', function () {
+    Payment::factory()->create(['amount' => 5_000, 'received_at' => now()->subMonths(2)]);
 
     expect(Livewire::test('pages::admin.dashboard')->get('revenue'))->toBe(0);
 });
