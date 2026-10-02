@@ -40,7 +40,7 @@ test('awaiting payment counts pending reservations across all three types', func
     expect(Livewire::test('pages::admin.dashboard')->get('awaitingPayment'))->toBe(4);
 });
 
-test('confirmed revenue counts only money actually received this month', function () {
+test('revenue counts money actually collected this month', function () {
     $hall = Hall::factory()->create(['rent_price' => 8000, 'skirting_price' => 5000]);
 
     // Confirmed: ₱13,000 total, ₱6,500 down.
@@ -52,13 +52,38 @@ test('confirmed revenue counts only money actually received this month', functio
     // Cancelled likewise.
     Booking::factory()->for($hall)->cancelled()->create(['include_skirting' => true, 'hours' => 4]);
 
-    expect(Livewire::test('pages::admin.dashboard')->get('confirmedRevenue'))->toBe(6_500);
+    expect(Livewire::test('pages::admin.dashboard')->get('revenue'))->toBe(6_500);
+});
+
+/**
+ * Revenue used to count Confirmed only, so a booking's money vanished from the dashboard
+ * the moment staff marked it completed.
+ */
+test('revenue keeps counting a booking once it is completed, balance included', function () {
+    $hall = Hall::factory()->create(['rent_price' => 8000, 'skirting_price' => 5000]);
+
+    $booking = Booking::factory()->for($hall)->confirmed()->create([
+        'include_skirting' => true,
+        'hours' => 4,
+        'start_date' => today()->subDay()->toDateString(),
+    ]);
+
+    expect($booking->transitionTo(BookingStatus::Completed))->toBeTrue();
+
+    // Completing settles the balance, so the full ₱13,000 has been collected.
+    expect(Livewire::test('pages::admin.dashboard')->get('revenue'))->toBe(13_000);
 });
 
 test('revenue ignores reservations placed before this month', function () {
     Booking::factory()->confirmed()->create(['created_at' => now()->subMonths(2)]);
 
-    expect(Livewire::test('pages::admin.dashboard')->get('confirmedRevenue'))->toBe(0);
+    expect(Livewire::test('pages::admin.dashboard')->get('revenue'))->toBe(0);
+});
+
+test('the revenue tile links to the sales page', function () {
+    $this->get(route('admin.dashboard'))
+        ->assertOk()
+        ->assertSee(route('admin.sales'));
 });
 
 test('upcoming counts the next seven days and excludes cancelled', function () {

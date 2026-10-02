@@ -11,6 +11,7 @@
         ['label' => __('Rooms'), 'route' => 'admin.rooms'],
         ['label' => __('Catering'), 'route' => 'admin.catering'],
         ['label' => __('Bookings'), 'route' => 'admin.bookings'],
+        ['label' => __('Sales'), 'route' => 'admin.sales'],
         ['label' => __('Settings'), 'route' => 'profile.edit'],
     ];
 @endphp

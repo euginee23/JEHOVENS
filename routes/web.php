@@ -57,6 +57,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('admin/rooms', 'pages::admin.rooms')->name('admin.rooms');
     Route::livewire('admin/catering', 'pages::admin.catering')->name('admin.catering');
     Route::livewire('admin/bookings', 'pages::admin.bookings')->name('admin.bookings');
+    Route::livewire('admin/sales', 'pages::admin.sales')->name('admin.sales');
 });
 
 /*

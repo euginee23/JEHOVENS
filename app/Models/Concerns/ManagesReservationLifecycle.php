@@ -150,6 +150,25 @@ trait ManagesReservationLifecycle
     }
 
     /**
+     * Undo a completion made by mistake, putting the reservation back to Confirmed.
+     *
+     * Kept apart from {@see transitionTo()} on purpose: Completed is final as far as the
+     * status buttons go, and this is the one guarded way back. The guest is not told —
+     * as far as they are concerned their booking was confirmed all along. The settled
+     * balance is left alone, since the money was collected either way.
+     */
+    public function reopen(): bool
+    {
+        if ($this->status !== BookingStatus::Completed) {
+            return false;
+        }
+
+        $this->status = BookingStatus::Confirmed;
+
+        return $this->save();
+    }
+
+    /**
      * Record that the remaining balance has been collected.
      */
     public function settleBalance(): bool

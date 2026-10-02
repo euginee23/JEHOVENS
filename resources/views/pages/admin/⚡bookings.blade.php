@@ -304,6 +304,25 @@ class extends Component {
     }
 
     /**
+     * Put a booking completed by mistake back to confirmed.
+     */
+    public function reopenBooking(int $bookingId): void
+    {
+        $model = $this->model();
+        $booking = $model::findOrFail($bookingId);
+
+        if (! $booking->reopen()) {
+            Flux::toast(variant: 'warning', text: __('Only a completed booking can be reopened.'));
+
+            return;
+        }
+
+        $this->refreshLists();
+
+        Flux::toast(variant: 'success', text: __(':reference is confirmed again.', ['reference' => $booking->reference]));
+    }
+
+    /**
      * Record that the remaining balance has been collected.
      */
     public function settleBalance(int $bookingId): void
@@ -357,7 +376,7 @@ class extends Component {
         <div>
             <h1 class="text-3xl font-bold tracking-tight text-zinc-900">{{ __('Bookings') }}</h1>
             <p class="mt-2 text-zinc-600">
-                {{ __('Confirm downpayments, record balances, and cancel reservations.') }}
+                {{ __('Confirm downpayments, record balances, and mark bookings completed or cancelled.') }}
             </p>
         </div>
 
@@ -414,6 +433,24 @@ class extends Component {
             </button>
         @endforeach
     </div>
+
+    {{-- What each status means. Folded away so it does not push the list down for staff
+         who already know, but always one click from anyone who does not. --}}
+    <details class="group mt-3">
+        <summary class="inline-flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700">
+            <flux:icon.information-circle variant="micro" />
+            {{ __('What do the statuses mean?') }}
+        </summary>
+
+        <dl class="mt-3 grid gap-3 rounded-2xl border border-zinc-200 bg-white p-5 text-sm shadow-sm md:grid-cols-2">
+            @foreach (BookingStatus::cases() as $case)
+                <div wire:key="guide-{{ $case->value }}" class="flex flex-col items-start gap-1.5">
+                    <dt class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $case->classes() }}">{{ $case->shortLabel() }}</dt>
+                    <dd class="text-zinc-600">{{ $case->description() }}</dd>
+                </div>
+            @endforeach
+        </dl>
+    </details>
 
     {{-- Filters --}}
     <div class="mt-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -599,7 +636,7 @@ class extends Component {
                                                         }"
                                                         :variant="$target === BookingStatus::Cancelled ? 'danger' : null"
                                                     >
-                                                        {{ __('Mark :status', ['status' => strtolower($target->shortLabel())]) }}
+                                                        {{ $target->actionLabel() }}
                                                     </flux:menu.item>
                                                 @endforeach
 
@@ -769,12 +806,9 @@ class extends Component {
                 @endif
 
                 <div class="space-y-3 border-t border-zinc-200 pt-4">
-                    {{-- Only when it says more than the badge above already does. For a
-                         pending booking that is "Awaiting payment confirmation", which is
-                         worth reading; for a confirmed one it would just repeat itself. --}}
-                    @if ($b->status->label() !== $b->status->shortLabel())
-                        <p class="text-sm text-zinc-600">{{ $b->status->label() }}</p>
-                    @endif
+                    {{-- What the badge above means and what happens next, so nobody has
+                         to guess what a status is for. --}}
+                    <p class="text-sm text-zinc-600">{{ $b->status->description() }}</p>
 
                     <div class="flex flex-wrap items-center gap-2">
                         @foreach ($b->status->transitions() as $target)
@@ -784,9 +818,23 @@ class extends Component {
                                 wire:click="moveTo({{ $b->id }}, '{{ $target->value }}')"
                                 :variant="$target === BookingStatus::Confirmed ? 'primary' : ($target === BookingStatus::Cancelled ? 'danger' : 'filled')"
                             >
-                                {{ __('Mark :status', ['status' => strtolower($target->shortLabel())]) }}
+                                {{ $target->actionLabel() }}
                             </flux:button>
                         @endforeach
+
+                        {{-- Completed is final, so there are no status buttons for it; this
+                             is the one way back, for a booking completed by mistake. --}}
+                        @if ($b->status === BookingStatus::Completed)
+                            <flux:button
+                                size="sm"
+                                variant="ghost"
+                                icon="arrow-uturn-left"
+                                wire:click="reopenBooking({{ $b->id }})"
+                                wire:confirm="{{ __('Reopen :reference? This puts it back to confirmed and holds its dates again.', ['reference' => $b->reference]) }}"
+                            >
+                                {{ __('Reopen booking') }}
+                            </flux:button>
+                        @endif
 
                         @if ($b->hasOutstandingBalance() && $b->status === BookingStatus::Confirmed)
                             <flux:button size="sm" variant="filled" icon="banknotes" wire:click="settleBalance({{ $b->id }})">

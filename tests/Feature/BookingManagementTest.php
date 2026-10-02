@@ -9,6 +9,7 @@ use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\User;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Notification;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -205,19 +206,57 @@ test('an invalid status move is refused instead of throwing', function () {
     expect($booking->refresh()->status)->toBe(BookingStatus::Pending);
 });
 
-test('a completed booking can only be walked back to confirmed', function () {
+/**
+ * Completed used to lead back to Confirmed, which left "Mark confirmed" as the only button
+ * on a completed booking and read to the resort as the status flipping back and forth.
+ */
+test('a completed booking is final as far as the status buttons go', function () {
     $booking = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
 
-    foreach (['pending', 'cancelled'] as $target) {
+    expect(BookingStatus::Completed->transitions())->toBe([]);
+
+    foreach (['pending', 'confirmed', 'cancelled'] as $target) {
         Livewire::test('pages::admin.bookings')->call('moveTo', $booking->id, $target);
     }
 
     expect($booking->refresh()->status)->toBe(BookingStatus::Completed);
+});
 
-    // Completing a booking releases its days, so an early click has to be undoable.
-    Livewire::test('pages::admin.bookings')->call('moveTo', $booking->id, 'confirmed');
+test('a booking completed by mistake can be reopened without emailing the guest', function () {
+    Notification::fake();
+
+    $booking = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
+
+    Livewire::test('pages::admin.bookings')
+        ->call('reopenBooking', $booking->id)
+        ->assertOk();
 
     expect($booking->refresh()->status)->toBe(BookingStatus::Confirmed);
+
+    Notification::assertNothingSent();
+});
+
+test('only a completed booking can be reopened', function () {
+    $booking = Booking::factory()->for($this->hall)->cancelled()->create();
+
+    Livewire::test('pages::admin.bookings')->call('reopenBooking', $booking->id);
+
+    expect($booking->refresh()->status)->toBe(BookingStatus::Cancelled);
+});
+
+test('the detail panel explains the status and offers reopen only once completed', function () {
+    $pending = Booking::factory()->for($this->hall)->create();
+    $completed = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
+
+    Livewire::test('pages::admin.bookings')
+        ->call('viewBooking', $pending->id)
+        ->assertSee(BookingStatus::Pending->description())
+        ->assertSee('Confirm booking')
+        ->assertDontSee('Reopen booking')
+        ->call('viewBooking', $completed->id)
+        ->assertSee(BookingStatus::Completed->description())
+        ->assertSee('Reopen booking')
+        ->assertDontSee('Mark completed');
 });
 
 /**

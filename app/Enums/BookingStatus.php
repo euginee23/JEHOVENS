@@ -30,10 +30,39 @@ enum BookingStatus: string
     public function shortLabel(): string
     {
         return match ($this) {
-            self::Pending => __('Pending'),
+            self::Pending => __('Awaiting payment'),
             self::Confirmed => __('Confirmed'),
             self::Completed => __('Completed'),
             self::Cancelled => __('Cancelled'),
+        };
+    }
+
+    /**
+     * What this status means, in a sentence staff can read without asking.
+     *
+     * "Pending" was the one status the resort could not place, so each now says what
+     * happened to the booking and what, if anything, happens next.
+     */
+    public function description(): string
+    {
+        return match ($this) {
+            self::Pending => __('The guest has booked but the downpayment has not been received yet. It confirms on its own once the payment comes in, and is cancelled if the payment window runs out.'),
+            self::Confirmed => __('The downpayment has been received and the dates are held for the guest.'),
+            self::Completed => __('The event or stay is over and the dates are free again. This is final.'),
+            self::Cancelled => __('The booking will not go ahead and the dates are free again.'),
+        };
+    }
+
+    /**
+     * The label for a button that moves a booking to this status.
+     */
+    public function actionLabel(): string
+    {
+        return match ($this) {
+            self::Pending => __('Reinstate'),
+            self::Confirmed => __('Confirm booking'),
+            self::Completed => __('Mark completed'),
+            self::Cancelled => __('Cancel booking'),
         };
     }
 
@@ -69,8 +98,10 @@ enum BookingStatus: string
     /**
      * Statuses an admin may move this booking to.
      *
-     * Completed can be walked back to Confirmed, which matters far more now that
-     * completing a booking puts its days back on sale.
+     * Completed is final. It used to lead back to Confirmed, which left "Mark confirmed"
+     * as the only button on a completed booking and read to staff as the status flipping
+     * back and forth. A mistaken completion is undone with
+     * {@see ManagesReservationLifecycle::reopen()} instead, which asks first.
      *
      * @return array<int, self>
      */
@@ -79,7 +110,7 @@ enum BookingStatus: string
         return match ($this) {
             self::Pending => [self::Confirmed, self::Cancelled],
             self::Confirmed => [self::Completed, self::Cancelled],
-            self::Completed => [self::Confirmed],
+            self::Completed => [],
             self::Cancelled => [self::Pending],
         };
     }

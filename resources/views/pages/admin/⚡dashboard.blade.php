@@ -5,6 +5,7 @@ use App\Models\Booking;
 use App\Models\CateringOrder;
 use App\Models\RoomBooking;
 use App\Support\ReservationSummary;
+use App\Support\SalesReport;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -45,19 +46,14 @@ class extends Component {
     }
 
     /**
-     * Money actually received this month.
+     * Money actually collected on reservations placed this month.
      *
-     * Confirmed only — a pending reservation is one we have not verified payment for, so
-     * counting it here would overstate takings.
+     * The rule lives in {@see SalesReport}, shared with the Sales page.
      */
     #[Computed]
-    public function confirmedRevenue(): int
+    public function revenue(): int
     {
-        $since = now()->startOfMonth();
-
-        return (int) Booking::where('status', BookingStatus::Confirmed)->where('created_at', '>=', $since)->sum('downpayment')
-            + (int) RoomBooking::where('status', BookingStatus::Confirmed)->where('created_at', '>=', $since)->sum('amount_paid')
-            + (int) CateringOrder::where('status', BookingStatus::Confirmed)->where('created_at', '>=', $since)->sum('downpayment');
+        return SalesReport::between(now()->startOfMonth(), now())['total']['collected'];
     }
 
     /**
@@ -122,7 +118,7 @@ class extends Component {
             $tiles = [
                 ['label' => __('Awaiting payment'), 'value' => number_format($this->awaitingPayment), 'note' => __('Not yet verified'), 'tone' => 'amber'],
                 ['label' => __('Booked this week'), 'value' => number_format($this->bookedThisWeek), 'note' => __('Since Monday'), 'tone' => 'brand'],
-                ['label' => __('Confirmed revenue'), 'value' => '₱'.number_format($this->confirmedRevenue), 'note' => __('Received this month'), 'tone' => 'brand'],
+                ['label' => __('Revenue this month'), 'value' => '₱'.number_format($this->revenue), 'note' => __('Collected · see Sales'), 'tone' => 'brand', 'href' => route('admin.sales')],
                 ['label' => __('Upcoming'), 'value' => number_format($this->upcoming), 'note' => __('Next 7 days'), 'tone' => 'zinc'],
             ];
         @endphp
@@ -140,7 +136,11 @@ class extends Component {
                     {{ $tile['value'] }}
                 </p>
 
-                <p class="mt-1 text-xs text-zinc-500">{{ $tile['note'] }}</p>
+                @isset($tile['href'])
+                    <a href="{{ $tile['href'] }}" class="mt-1 block text-xs font-medium text-brand-600 hover:text-brand-700">{{ $tile['note'] }}</a>
+                @else
+                    <p class="mt-1 text-xs text-zinc-500">{{ $tile['note'] }}</p>
+                @endisset
             </div>
         @endforeach
     </div>
@@ -193,12 +193,7 @@ class extends Component {
                                 <td class="whitespace-nowrap px-6 py-4 text-right text-zinc-600">₱{{ number_format($reservation->paid) }}</td>
 
                                 <td class="whitespace-nowrap px-6 py-4">
-                                    <span @class([
-                                        'rounded-full px-2.5 py-1 text-xs font-semibold',
-                                        'bg-amber-50 text-amber-700' => $reservation->status === BookingStatus::Pending,
-                                        'bg-brand-50 text-brand-700' => $reservation->status === BookingStatus::Confirmed,
-                                        'bg-zinc-100 text-zinc-500' => $reservation->status === BookingStatus::Cancelled,
-                                    ])>
+                                    <span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $reservation->status->classes() }}">
                                         {{ $reservation->status->label() }}
                                     </span>
                                 </td>
