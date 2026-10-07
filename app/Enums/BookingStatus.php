@@ -17,9 +17,9 @@ enum BookingStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::Pending => __('Awaiting payment confirmation'),
-            self::Confirmed => __('Confirmed'),
-            self::Completed => __('Completed'),
+            self::Pending => __('Waiting for payment'),
+            self::Confirmed => __('Booked'),
+            self::Completed => __('Done'),
             self::Cancelled => __('Cancelled'),
         };
     }
@@ -30,9 +30,9 @@ enum BookingStatus: string
     public function shortLabel(): string
     {
         return match ($this) {
-            self::Pending => __('Awaiting payment'),
-            self::Confirmed => __('Confirmed'),
-            self::Completed => __('Completed'),
+            self::Pending => __('Unpaid'),
+            self::Confirmed => __('Booked'),
+            self::Completed => __('Done'),
             self::Cancelled => __('Cancelled'),
         };
     }
@@ -40,28 +40,31 @@ enum BookingStatus: string
     /**
      * What this status means, in a sentence staff can read without asking.
      *
-     * "Pending" was the one status the resort could not place, so each now says what
-     * happened to the booking and what, if anything, happens next.
+     * One plain sentence each: the resort's staff read the status as a step in a line
+     * — Unpaid, then Booked, then Done — and needed each to say where that line stands.
      */
     public function description(): string
     {
         return match ($this) {
-            self::Pending => __('The guest has booked but the downpayment has not been received yet. It confirms on its own once the payment comes in, and is cancelled if the payment window runs out.'),
-            self::Confirmed => __('The downpayment has been received and the dates are held for the guest.'),
-            self::Completed => __('The event or stay is over and the dates are free again. This is final.'),
-            self::Cancelled => __('The booking will not go ahead and the dates are free again.'),
+            self::Pending => __('The guest has not paid the downpayment yet. It becomes Booked once the payment comes in.'),
+            self::Confirmed => __('The downpayment is paid and the dates are held for the guest. Mark it done once they have left.'),
+            self::Completed => __('The guest has come and gone. This is final. It is kept in History for your records.'),
+            self::Cancelled => __('The booking will not go ahead and the dates are free again. This is final. It is kept in History for your records.'),
         };
     }
 
     /**
      * The label for a button that moves a booking to this status.
+     *
+     * Nothing moves a booking back to Unpaid any more; that arm is only here because the
+     * match has to cover every case.
      */
     public function actionLabel(): string
     {
         return match ($this) {
-            self::Pending => __('Reinstate'),
-            self::Confirmed => __('Confirm booking'),
-            self::Completed => __('Mark completed'),
+            self::Pending => __('Mark unpaid'),
+            self::Confirmed => __('Confirm payment'),
+            self::Completed => __('Mark as done'),
             self::Cancelled => __('Cancel booking'),
         };
     }
@@ -96,12 +99,39 @@ enum BookingStatus: string
     }
 
     /**
+     * Statuses still in progress, which the bookings page lists as Active.
+     *
+     * @return array<int, self>
+     */
+    public static function active(): array
+    {
+        return [self::Pending, self::Confirmed];
+    }
+
+    /**
+     * Statuses that are over and done with, which the bookings page lists as History.
+     *
+     * @return array<int, self>
+     */
+    public static function history(): array
+    {
+        return [self::Completed, self::Cancelled];
+    }
+
+    /**
+     * Whether a booking in this status can no longer be changed.
+     */
+    public function isFinal(): bool
+    {
+        return in_array($this, self::history(), strict: true);
+    }
+
+    /**
      * Statuses an admin may move this booking to.
      *
-     * Completed is final. It used to lead back to Confirmed, which left "Mark confirmed"
-     * as the only button on a completed booking and read to staff as the status flipping
-     * back and forth. A mistaken completion is undone with
-     * {@see ManagesReservationLifecycle::reopen()} instead, which asks first.
+     * The line only runs one way: Unpaid, Booked, Done, with Cancelled open until then.
+     * Done and Cancelled used to have a way back — Reopen and Reinstate — and staff read
+     * the result as the status flipping back and forth, so both are final now.
      *
      * @return array<int, self>
      */
@@ -110,8 +140,7 @@ enum BookingStatus: string
         return match ($this) {
             self::Pending => [self::Confirmed, self::Cancelled],
             self::Confirmed => [self::Completed, self::Cancelled],
-            self::Completed => [],
-            self::Cancelled => [self::Pending],
+            self::Completed, self::Cancelled => [],
         };
     }
 }

@@ -145,5 +145,5 @@ test('a reservation shows its reference, guest, and money on the page', function
         ->assertSee('Grand Ballroom')
         ->assertSee('₱13,000')
         ->assertSee('₱6,500')
-        ->assertSee('Awaiting payment confirmation');
+        ->assertSee('Waiting for payment');
 });

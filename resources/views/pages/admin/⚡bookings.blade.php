@@ -32,6 +32,13 @@ class extends Component {
     #[Url(except: 'halls')]
     public string $type = 'halls';
 
+    /**
+     * Active (still in progress) or History (done and cancelled). Finished bookings used
+     * to sit in the same list as live ones, and staff could not tell which needed them.
+     */
+    #[Url(except: 'active')]
+    public string $view = 'active';
+
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
@@ -70,6 +77,39 @@ class extends Component {
         $this->reset(['venue', 'viewing']);
         $this->resetPage();
         $this->refreshLists();
+    }
+
+    /**
+     * Switch between active bookings and history.
+     *
+     * The status filter is cleared because each view has its own statuses — a Done chip
+     * carried into Active would match nothing.
+     */
+    public function showView(string $view): void
+    {
+        $this->view = $view === 'history' ? 'history' : 'active';
+
+        $this->reset(['status', 'viewing']);
+        $this->resetPage();
+        $this->refreshLists();
+    }
+
+    /**
+     * Whether the history view is showing.
+     */
+    public function showingHistory(): bool
+    {
+        return $this->view === 'history';
+    }
+
+    /**
+     * The statuses the current view lists.
+     *
+     * @return array<int, BookingStatus>
+     */
+    public function viewStatuses(): array
+    {
+        return $this->showingHistory() ? BookingStatus::history() : BookingStatus::active();
     }
 
     /**
@@ -172,6 +212,7 @@ class extends Component {
 
         return $model::query()
             ->with([$this->venueRelation(), 'dates'])
+            ->whereIn('status', $this->viewStatuses())
             ->when($this->search !== '', function (Builder $query) {
                 $term = '%'.$this->search.'%';
 
@@ -192,22 +233,40 @@ class extends Component {
     }
 
     /**
-     * How many bookings of each type exist, for the tab labels.
+     * How many bookings of each type sit in the current view, for the tab labels.
      *
      * @return array<string, int>
      */
     #[Computed]
     public function typeCounts(): array
     {
+        $statuses = $this->viewStatuses();
+
         return [
-            'halls' => Booking::count(),
-            'rooms' => RoomBooking::count(),
-            'catering' => CateringOrder::count(),
+            'halls' => Booking::whereIn('status', $statuses)->count(),
+            'rooms' => RoomBooking::whereIn('status', $statuses)->count(),
+            'catering' => CateringOrder::whereIn('status', $statuses)->count(),
         ];
     }
 
     /**
-     * Totals for the status chips, within the current tab.
+     * How many bookings of the current tab are active and how many are history.
+     *
+     * @return array{active: int, history: int}
+     */
+    #[Computed]
+    public function viewCounts(): array
+    {
+        $model = $this->model();
+
+        return [
+            'active' => $model::whereIn('status', BookingStatus::active())->count(),
+            'history' => $model::whereIn('status', BookingStatus::history())->count(),
+        ];
+    }
+
+    /**
+     * Totals for the status chips, within the current tab and view.
      *
      * @return array<string, int>
      */
@@ -217,6 +276,7 @@ class extends Component {
         $model = $this->model();
 
         $counts = $model::query()
+            ->whereIn('status', $this->viewStatuses())
             ->selectRaw('status, count(*) as total')
             ->groupBy('status')
             ->pluck('total', 'status')
@@ -224,7 +284,7 @@ class extends Component {
 
         return [
             '' => array_sum($counts),
-            ...collect(BookingStatus::cases())
+            ...collect($this->viewStatuses())
                 ->mapWithKeys(fn (BookingStatus $s) => [$s->value => (int) ($counts[$s->value] ?? 0)])
                 ->all(),
         ];
@@ -239,7 +299,7 @@ class extends Component {
         $model = $this->model();
 
         return (int) $model::query()
-            ->whereIn('status', [BookingStatus::Pending, BookingStatus::Confirmed])
+            ->whereIn('status', BookingStatus::active())
             ->whereNull('balance_settled_at')
             ->sum('balance');
     }
@@ -297,29 +357,23 @@ class extends Component {
 
         $this->refreshLists();
 
-        Flux::toast(variant: 'success', text: __(':reference is now :status.', [
-            'reference' => $booking->reference,
-            'status' => strtolower($target->shortLabel()),
-        ]));
-    }
+        // A finished booking leaves the active list, so say where it went rather than
+        // leaving staff to wonder why the row vanished.
+        if ($target->isFinal()) {
+            Flux::modal('booking-detail')->close();
 
-    /**
-     * Put a booking completed by mistake back to confirmed.
-     */
-    public function reopenBooking(int $bookingId): void
-    {
-        $model = $this->model();
-        $booking = $model::findOrFail($bookingId);
-
-        if (! $booking->reopen()) {
-            Flux::toast(variant: 'warning', text: __('Only a completed booking can be reopened.'));
+            Flux::toast(variant: 'success', text: __(':reference is :status and moved to History.', [
+                'reference' => $booking->reference,
+                'status' => strtolower($target->shortLabel()),
+            ]));
 
             return;
         }
 
-        $this->refreshLists();
-
-        Flux::toast(variant: 'success', text: __(':reference is confirmed again.', ['reference' => $booking->reference]));
+        Flux::toast(variant: 'success', text: __(':reference is now :status.', [
+            'reference' => $booking->reference,
+            'status' => strtolower($target->shortLabel()),
+        ]));
     }
 
     /**
@@ -367,7 +421,7 @@ class extends Component {
      */
     protected function refreshLists(): void
     {
-        unset($this->bookings, $this->counts, $this->outstanding, $this->booking, $this->venues, $this->typeCounts);
+        unset($this->bookings, $this->counts, $this->outstanding, $this->booking, $this->venues, $this->typeCounts, $this->viewCounts);
     }
 }; ?>
 
@@ -376,7 +430,7 @@ class extends Component {
         <div>
             <h1 class="text-3xl font-bold tracking-tight text-zinc-900">{{ __('Bookings') }}</h1>
             <p class="mt-2 text-zinc-600">
-                {{ __('Confirm downpayments, record balances, and mark bookings completed or cancelled.') }}
+                {{ __('Confirm payments, record balances, and mark bookings done or cancelled.') }}
             </p>
         </div>
 
@@ -409,10 +463,34 @@ class extends Component {
         @endforeach
     </div>
 
-    {{-- Status chips --}}
-    <div class="mt-6 flex flex-wrap gap-2">
+    {{-- Active or history. Done and cancelled bookings are final, so they move out of
+         the way of the ones staff still have to act on. --}}
+    <div class="mt-6 inline-flex rounded-full border border-zinc-200 bg-white p-1" role="tablist">
+        @foreach (['active' => __('Active'), 'history' => __('History')] as $value => $label)
+            <button
+                type="button"
+                wire:key="view-{{ $value }}"
+                wire:click="showView('{{ $value }}')"
+                role="tab"
+                aria-selected="{{ $view === $value ? 'true' : 'false' }}"
+                @class([
+                    'rounded-full px-4 py-1.5 text-sm font-semibold transition',
+                    'bg-zinc-900 text-white' => $view === $value,
+                    'text-zinc-600 hover:text-zinc-900' => $view !== $value,
+                ])
+            >
+                {{ $label }}
+                <span @class(['ms-1 text-xs', 'text-white/70' => $view === $value, 'text-zinc-400' => $view !== $value])>
+                    {{ $this->viewCounts[$value] }}
+                </span>
+            </button>
+        @endforeach
+    </div>
+
+    {{-- Status chips, for the statuses in this view only --}}
+    <div class="mt-4 flex flex-wrap gap-2">
         @php
-            $chips = ['' => __('All')] + collect(BookingStatus::cases())->mapWithKeys(fn ($s) => [$s->value => $s->shortLabel()])->all();
+            $chips = ['' => __('All')] + collect($this->viewStatuses())->mapWithKeys(fn ($s) => [$s->value => $s->shortLabel()])->all();
         @endphp
 
         @foreach ($chips as $value => $label)
@@ -442,14 +520,23 @@ class extends Component {
             {{ __('What do the statuses mean?') }}
         </summary>
 
-        <dl class="mt-3 grid gap-3 rounded-2xl border border-zinc-200 bg-white p-5 text-sm shadow-sm md:grid-cols-2">
-            @foreach (BookingStatus::cases() as $case)
-                <div wire:key="guide-{{ $case->value }}" class="flex flex-col items-start gap-1.5">
-                    <dt class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $case->classes() }}">{{ $case->shortLabel() }}</dt>
-                    <dd class="text-zinc-600">{{ $case->description() }}</dd>
-                </div>
-            @endforeach
-        </dl>
+        <div class="mt-3 rounded-2xl border border-zinc-200 bg-white p-5 text-sm shadow-sm">
+            <p class="font-medium text-zinc-900">
+                {{ __('Unpaid → Booked → Done. A booking can be cancelled any time before it is done.') }}
+            </p>
+            <p class="mt-1 text-zinc-600">
+                {{ __('Done and Cancelled are final. They leave the Active list and are kept in History.') }}
+            </p>
+
+            <dl class="mt-4 grid gap-3 md:grid-cols-2">
+                @foreach (BookingStatus::cases() as $case)
+                    <div wire:key="guide-{{ $case->value }}" class="flex flex-col items-start gap-1.5">
+                        <dt class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $case->classes() }}">{{ $case->shortLabel() }}</dt>
+                        <dd class="text-zinc-600">{{ $case->description() }}</dd>
+                    </div>
+                @endforeach
+            </dl>
+        </div>
     </details>
 
     {{-- Filters --}}
@@ -491,11 +578,11 @@ class extends Component {
             <p class="m-6 rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500">
                 {{ $this->isFiltered()
                     ? __('No bookings match these filters.')
-                    : match ($type) {
+                    : ($this->showingHistory() ? __('No done or cancelled bookings yet.') : match ($type) {
                         'rooms' => __('No room bookings yet.'),
                         'catering' => __('No catering orders yet.'),
                         default => __('No function hall bookings yet.'),
-                    } }}
+                    }) }}
             </p>
         @else
             {{-- No `min-w-*`: the table is sized to fit rather than forced past the
@@ -615,6 +702,8 @@ class extends Component {
                                             {{ __('View') }}
                                         </flux:button>
 
+                                        {{-- Done and cancelled bookings are final: nothing to offer. --}}
+                                        @unless ($row->status->isFinal())
                                         <flux:dropdown position="bottom" align="end">
                                             <flux:button
                                                 size="sm"
@@ -628,6 +717,7 @@ class extends Component {
                                                     <flux:menu.item
                                                         wire:key="move-{{ $type }}-{{ $row->id }}-{{ $target->value }}"
                                                         wire:click="moveTo({{ $row->id }}, '{{ $target->value }}')"
+                                                        :wire:confirm="$target->isFinal() ? __(':action for :reference? This cannot be undone.', ['action' => $target->actionLabel(), 'reference' => $row->reference]) : null"
                                                         :icon="match ($target) {
                                                             BookingStatus::Confirmed => 'check-circle',
                                                             BookingStatus::Completed => 'flag',
@@ -652,6 +742,7 @@ class extends Component {
                                                 @endif
                                             </flux:menu>
                                         </flux:dropdown>
+                                        @endunless
                                     </div>
                                 </td>
                             </tr>
@@ -841,25 +932,12 @@ class extends Component {
                                 size="sm"
                                 wire:key="detail-move-{{ $target->value }}"
                                 wire:click="moveTo({{ $b->id }}, '{{ $target->value }}')"
+                                :wire:confirm="$target->isFinal() ? __(':action for :reference? This cannot be undone.', ['action' => $target->actionLabel(), 'reference' => $b->reference]) : null"
                                 :variant="$target === BookingStatus::Confirmed ? 'primary' : ($target === BookingStatus::Cancelled ? 'danger' : 'filled')"
                             >
                                 {{ $target->actionLabel() }}
                             </flux:button>
                         @endforeach
-
-                        {{-- Completed is final, so there are no status buttons for it; this
-                             is the one way back, for a booking completed by mistake. --}}
-                        @if ($b->status === BookingStatus::Completed)
-                            <flux:button
-                                size="sm"
-                                variant="ghost"
-                                icon="arrow-uturn-left"
-                                wire:click="reopenBooking({{ $b->id }})"
-                                wire:confirm="{{ __('Reopen :reference? This puts it back to confirmed and holds its dates again.', ['reference' => $b->reference]) }}"
-                            >
-                                {{ __('Reopen booking') }}
-                            </flux:button>
-                        @endif
 
                         @if ($b->hasOutstandingBalance() && $b->status === BookingStatus::Confirmed)
                             <flux:button size="sm" variant="filled" icon="banknotes" wire:click="settleBalance({{ $b->id }})">

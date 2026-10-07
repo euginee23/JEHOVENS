@@ -9,7 +9,6 @@ use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\User;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Notification;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -105,18 +104,19 @@ test('the halls and catering tabs list their date ranges', function () {
         ->assertSee('3 days');
 });
 
-test('the status chips show how many bookings sit in each state', function () {
+test('the status chips show how many bookings sit in each state of the current view', function () {
     Booking::factory()->for($this->hall)->count(2)->create(['status' => BookingStatus::Pending]);
     Booking::factory()->for($this->hall)->confirmed()->create();
     Booking::factory()->for($this->hall)->cancelled()->create();
+    Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
 
-    $counts = Livewire::test('pages::admin.bookings')->get('counts');
+    $page = Livewire::test('pages::admin.bookings');
 
-    expect($counts[''])->toBe(4)
-        ->and($counts['pending'])->toBe(2)
-        ->and($counts['confirmed'])->toBe(1)
-        ->and($counts['completed'])->toBe(0)
-        ->and($counts['cancelled'])->toBe(1);
+    expect($page->get('counts'))->toBe(['' => 3, 'pending' => 2, 'confirmed' => 1])
+        ->and($page->get('viewCounts'))->toBe(['active' => 3, 'history' => 2]);
+
+    expect($page->call('showView', 'history')->get('counts'))
+        ->toBe(['' => 2, 'completed' => 1, 'cancelled' => 1]);
 });
 
 /**
@@ -222,41 +222,34 @@ test('a completed booking is final as far as the status buttons go', function ()
     expect($booking->refresh()->status)->toBe(BookingStatus::Completed);
 });
 
-test('a booking completed by mistake can be reopened without emailing the guest', function () {
-    Notification::fake();
-
+/**
+ * Reopen used to put a completed booking back to confirmed, and staff read it as the
+ * status flipping back and forth. Done is final now, with no way back at all.
+ */
+test('a done booking can no longer be reopened', function () {
     $booking = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
 
     Livewire::test('pages::admin.bookings')
-        ->call('reopenBooking', $booking->id)
-        ->assertOk();
+        ->call('viewBooking', $booking->id)
+        ->assertDontSee('Reopen booking');
 
-    expect($booking->refresh()->status)->toBe(BookingStatus::Confirmed);
-
-    Notification::assertNothingSent();
+    expect(method_exists($booking, 'reopen'))->toBeFalse();
 });
 
-test('only a completed booking can be reopened', function () {
-    $booking = Booking::factory()->for($this->hall)->cancelled()->create();
-
-    Livewire::test('pages::admin.bookings')->call('reopenBooking', $booking->id);
-
-    expect($booking->refresh()->status)->toBe(BookingStatus::Cancelled);
-});
-
-test('the detail panel explains the status and offers reopen only once completed', function () {
+test('the detail panel explains the status and offers no moves once a booking is final', function () {
     $pending = Booking::factory()->for($this->hall)->create();
     $completed = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
 
     Livewire::test('pages::admin.bookings')
         ->call('viewBooking', $pending->id)
         ->assertSee(BookingStatus::Pending->description())
-        ->assertSee('Confirm booking')
-        ->assertDontSee('Reopen booking')
+        ->assertSee('Confirm payment')
+        ->assertSee('Cancel booking')
+        ->call('showView', 'history')
         ->call('viewBooking', $completed->id)
         ->assertSee(BookingStatus::Completed->description())
-        ->assertSee('Reopen booking')
-        ->assertDontSee('Mark completed');
+        ->assertDontSee('Mark as done')
+        ->assertDontSeeHtml("moveTo({$completed->id},");
 });
 
 /**
@@ -290,13 +283,66 @@ test('a booking can be completed once its closing hour has passed', function () 
     expect($booking->refresh()->status)->toBe(BookingStatus::Completed);
 });
 
-test('a cancelled booking can be reinstated as pending', function () {
+/**
+ * Cancelled used to lead back to Pending through Reinstate, which offered Confirm and
+ * Cancel all over again. Cancelled is final now.
+ */
+test('a cancelled booking is final', function () {
+    $booking = Booking::factory()->for($this->hall)->cancelled()->create();
+
+    expect(BookingStatus::Cancelled->transitions())->toBe([]);
+
+    foreach (['pending', 'confirmed', 'completed'] as $target) {
+        Livewire::test('pages::admin.bookings')->call('moveTo', $booking->id, $target)->assertOk();
+    }
+
+    expect($booking->refresh()->status)->toBe(BookingStatus::Cancelled);
+});
+
+test('the active view lists unpaid and booked, and history lists done and cancelled', function () {
+    $pending = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Pending]);
+    $confirmed = Booking::factory()->for($this->hall)->confirmed()->create();
+    $completed = Booking::factory()->for($this->hall)->create(['status' => BookingStatus::Completed]);
+    $cancelled = Booking::factory()->for($this->hall)->cancelled()->create();
+
+    $page = Livewire::test('pages::admin.bookings');
+
+    expect($page->get('bookings')->pluck('id')->sort()->values()->all())
+        ->toBe([$pending->id, $confirmed->id]);
+
+    expect($page->call('showView', 'history')->get('bookings')->pluck('id')->sort()->values()->all())
+        ->toBe([$completed->id, $cancelled->id]);
+});
+
+test('marking a booking done moves it from active to history', function () {
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create([
+        'start_date' => today()->subWeek()->toDateString(),
+    ]);
+
+    $page = Livewire::test('pages::admin.bookings')
+        ->call('moveTo', $booking->id, 'completed')
+        ->assertOk();
+
+    expect($booking->refresh()->status)->toBe(BookingStatus::Completed)
+        ->and($page->get('bookings')->pluck('id')->all())->not->toContain($booking->id)
+        ->and($page->call('showView', 'history')->get('bookings')->pluck('id')->all())->toContain($booking->id);
+});
+
+test('switching view clears the status filter', function () {
+    Livewire::test('pages::admin.bookings')
+        ->set('status', 'pending')
+        ->call('showView', 'history')
+        ->assertSet('view', 'history')
+        ->assertSet('status', '');
+});
+
+test('done and cancelled rows offer no actions menu', function () {
     $booking = Booking::factory()->for($this->hall)->cancelled()->create();
 
     Livewire::test('pages::admin.bookings')
-        ->call('moveTo', $booking->id, 'pending');
-
-    expect($booking->refresh()->status)->toBe(BookingStatus::Pending);
+        ->call('showView', 'history')
+        ->assertSee($booking->reference)
+        ->assertDontSee('Actions for '.$booking->reference);
 });
 
 test('the balance can be recorded as paid, but only once', function () {

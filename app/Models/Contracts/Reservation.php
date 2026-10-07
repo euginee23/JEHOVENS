@@ -66,11 +66,6 @@ interface Reservation extends Schedulable
     public function transitionTo(BookingStatus $status, bool $notify = true): bool;
 
     /**
-     * Undo a completion made by mistake, putting this back to Confirmed.
-     */
-    public function reopen(): bool;
-
-    /**
      * Record that the remaining balance has been collected.
      */
     public function settleBalance(): bool;

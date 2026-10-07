@@ -36,10 +36,13 @@ test('confirming a booking by hand records the downpayment, credited to the staf
         ->and($payment->received_at->isToday())->toBeTrue();
 });
 
-test('a booking cancelled, reinstated and confirmed again records its downpayment only once', function () {
-    $this->booking->transitionTo(BookingStatus::Confirmed);
-    $this->booking->transitionTo(BookingStatus::Cancelled);
-    $this->booking->transitionTo(BookingStatus::Pending);
+test('confirming a booking whose downpayment is already in the ledger does not record it twice', function () {
+    $this->booking->payments()->create([
+        'kind' => PaymentKind::Downpayment,
+        'amount' => 6_500,
+        'received_at' => now(),
+    ]);
+
     $this->booking->transitionTo(BookingStatus::Confirmed);
 
     expect($this->booking->payments()->count())->toBe(1);

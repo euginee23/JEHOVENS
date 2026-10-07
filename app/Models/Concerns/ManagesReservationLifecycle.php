@@ -173,25 +173,6 @@ trait ManagesReservationLifecycle
     }
 
     /**
-     * Undo a completion made by mistake, putting the reservation back to Confirmed.
-     *
-     * Kept apart from {@see transitionTo()} on purpose: Completed is final as far as the
-     * status buttons go, and this is the one guarded way back. The guest is not told —
-     * as far as they are concerned their booking was confirmed all along. The settled
-     * balance is left alone, since the money was collected either way.
-     */
-    public function reopen(): bool
-    {
-        if ($this->status !== BookingStatus::Completed) {
-            return false;
-        }
-
-        $this->status = BookingStatus::Confirmed;
-
-        return $this->save();
-    }
-
-    /**
      * Record that the remaining balance has been collected.
      */
     public function settleBalance(): bool
@@ -216,8 +197,8 @@ trait ManagesReservationLifecycle
     /**
      * Write the downpayment into the payments ledger, once.
      *
-     * Once, because a booking can be confirmed more than once — cancelled, reinstated and
-     * confirmed again — and the guest only paid the one downpayment. A PayMongo payment
+     * Once, because the guest only paid the one downpayment. The status buttons no longer
+     * lead back to Confirmed, but a gateway can still deliver the same payment twice. A PayMongo payment
      * carries its own method, reference and time; one confirmed by hand is dated now and
      * credited to whoever is signed in.
      */
