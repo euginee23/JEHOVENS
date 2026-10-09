@@ -2,6 +2,7 @@
 
 namespace App\Notifications;
 
+use App\Models\ResortSetting;
 use App\Support\ReservationSummary;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -17,6 +18,10 @@ use Illuminate\Notifications\Notification;
  *
  * Guests mostly book without an account, so these are sent to an address rather than to
  * a User — see ManagesReservationLifecycle::notifyGuest().
+ *
+ * Replies go to the resort contact staff set in Settings → Mail, not to the sending
+ * address, and every template is handed that contact so it can tell the guest how to get
+ * in touch.
  */
 abstract class ReservationNotification extends Notification implements ShouldQueue
 {
@@ -45,13 +50,35 @@ abstract class ReservationNotification extends Notification implements ShouldQue
     abstract protected function template(): string;
 
     /**
+     * Where a reply to this email should land.
+     *
+     * The resort's contact address, so a guest answering their receipt reaches the inbox
+     * staff watch. Null leaves replies going to the sending address.
+     */
+    protected function replyTo(ResortSetting $resort): ?string
+    {
+        return $resort->contact_email;
+    }
+
+    /**
      * Get the mail representation of the notification.
      */
     public function toMail(object $notifiable): MailMessage
     {
-        return (new MailMessage)
+        $resort = ResortSetting::current();
+
+        $message = (new MailMessage)
             ->subject($this->subject())
-            ->markdown($this->template(), ['reservation' => $this->reservation]);
+            ->markdown($this->template(), [
+                'reservation' => $this->reservation,
+                'contact' => $resort,
+            ]);
+
+        if (filled($replyTo = $this->replyTo($resort))) {
+            $message->replyTo($replyTo);
+        }
+
+        return $message;
     }
 
     /**

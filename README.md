@@ -408,11 +408,18 @@ php artisan resort:expire-unpaid-reservations
 ## Email and background jobs
 
 Every booking email — the guest's receipt, the resort's new-booking alert, and one for
-each status change and settled balance — goes through `App\Notifications\ReservationNotification`.
-Two things have to be true for a guest to actually receive one.
+each status change and settled balance — goes through `App\Support\DeliverMail`. Each
+has its own template in `resources/views/mail/`.
 
-**1. A real mailer.** Locally, `.env.example` points at [Mailpit](https://mailpit.axllent.org),
-which catches every outgoing message so nothing reaches a real guest by accident:
+**Mail is sent immediately**, during the request that triggers it, so it needs no queue
+worker. A failed send is logged rather than thrown, so an admin clicking "Mark as done"
+never sees an error just because the mail server was down — the change saves, and the
+toast turns into a warning that the guest was not emailed. `MAIL_TIMEOUT` (10 seconds by
+default) caps how long one email can hold the page when the mail server is unreachable.
+
+**A real mailer is what has to be set up.** Locally, `.env.example` points at
+[Mailpit](https://mailpit.axllent.org), which catches every outgoing message so nothing
+reaches a real guest by accident:
 
 ```bash
 mailpit          # SMTP on 1025, read what was "sent" at http://localhost:8025
@@ -420,7 +427,8 @@ mailpit          # SMTP on 1025, read what was "sent" at http://localhost:8025
 
 No Mailpit installed? Set `MAIL_MAILER=log` and read `storage/logs/laravel.log` instead.
 
-For a server that should really deliver, set these in `.env`:
+For a server that should really deliver, set these in `.env`, then
+`php artisan config:clear`:
 
 ```dotenv
 MAIL_MAILER=smtp
@@ -439,50 +447,48 @@ RESORT_NOTIFICATION_EMAIL=bookings@your-domain.com
 `MAIL_FROM_ADDRESS` must be an address your provider is allowed to send as, or the mail
 will be accepted and then silently dropped.
 
-**2. Something draining the queue.** The notifications are queued, and `QUEUE_CONNECTION`
-is `database`, so without a worker they pile up in the `jobs` table and **nothing is ever
-sent**. `composer dev` starts one for you locally — which is why mail works in development
-and can silently stop working in production.
+**Settings → Mail** (`/admin/settings/mail`) is where staff manage email from the browser:
 
-Best, where the host allows a long-running process — under supervisor or systemd, so it
-restarts on failure:
+- **Resort contact** — the resort's email and contact number. Every email a guest receives
+  ends with them, and a guest replying to any of those emails reaches the resort email
+  rather than the `MAIL_FROM_ADDRESS` it was sent from. Until it is filled in, replies go
+  to the sending address and no contact line is shown.
+- **Sending** — the mail settings the app is running with, and a **Send test email**
+  button that sends straight away and shows the mail server's actual answer. If the test
+  email arrives, booking email will too. It also warns about the two settings that break
+  mail without any error: a placeholder `MAIL_FROM_ADDRESS`, and an `APP_URL` that doesn't
+  match the site, which sends the buttons in emails to the wrong place.
+
+**Deploying to a server:** run `php artisan migrate --force` (the resort contact lives in
+the `resort_settings` table — until it exists, emails still go out but without the
+contact line), then `php artisan config:clear`. Some VPS providers block outgoing SMTP
+ports by default; if the test email fails with "Connection could not be established",
+ask the provider to open port 587 or 465.
+
+### Queueing mail (optional)
+
+Sending inline means the guest waits on SMTP for a second or two. Where a queue worker is
+kept running, booking mail can be queued instead:
+
+```dotenv
+RESORT_MAIL_QUEUED=true
+```
+
+**Only turn this on with something draining the queue**, or booking mail piles up in the
+`jobs` table and is never sent. Either a worker, under supervisor or systemd so it restarts
+on failure:
 
 ```bash
 php artisan queue:work --tries=3 --timeout=60
 ```
 
-**No daemons allowed?** Plenty of shared hosting won't run one. Set this instead:
-
-```dotenv
-QUEUE_DRAIN_ON_SCHEDULE=true
-```
-
-The scheduler then drains the queue every minute, riding on the `schedule:run` cron this
-app already needs for the unpaid-booking sweeper. Mail arrives up to a minute late, which
-for a booking confirmation nobody notices. Leave it off wherever a real worker runs, so
-the two aren't draining the same queue.
-
-**Nothing at all — no cron either?** `QUEUE_CONNECTION=sync` sends mail inline during the
-request. No infrastructure needed, but the guest waits on SMTP, and the unpaid-booking
-sweeper still won't run.
+or, where hosting won't run a daemon, `QUEUE_DRAIN_ON_SCHEDULE=true`, which drains the queue
+every minute from the `schedule:run` cron this app already needs for the unpaid-booking
+sweeper.
 
 Restart the worker after every deploy (`php artisan queue:restart`) — workers hold the old
-code in memory. Check `php artisan queue:failed` if a guest reports a missing email.
-
-**When no email arrives**, there are two quite different causes and one command that tells
-them apart:
-
-```bash
-php artisan resort:mail-check
-```
-
-It sends to `RESORT_MAIL_TEST_ADDRESS`, falling back to `RESORT_NOTIFICATION_EMAIL`, and
-`--to=you@example.com` overrides both.
-
-It prints the mailer and the queue depth, then sends one message *immediately*, skipping
-the queue. If that message arrives but booking email does not, the transport is fine and
-**nothing is draining the queue** — start the worker. A growing "Jobs waiting" count is the
-same story told another way.
+code in memory. A growing `jobs` table (`php artisan queue:monitor database:default`) means
+no worker is running; `php artisan queue:failed` lists sends that errored.
 
 ---
 

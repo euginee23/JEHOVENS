@@ -5,6 +5,7 @@ use App\Models\Booking;
 use App\Models\CateringOrder;
 use App\Models\CateringPackage;
 use App\Models\Hall;
+use App\Models\ResortSetting;
 use App\Models\Room;
 use App\Models\RoomBooking;
 use App\Models\User;
@@ -14,8 +15,12 @@ use App\Notifications\ReservationHoldExpired;
 use App\Notifications\ReservationPaymentFailed;
 use App\Notifications\ReservationReceived;
 use App\Notifications\ReservationStatusChanged;
+use Illuminate\Database\QueryException;
 use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Guests mostly book without an account, so every one of these is addressed to an email
@@ -90,10 +95,11 @@ test('settling the balance emails the guest a receipt', function () {
 });
 
 /**
- * Completing a booking settles whatever was still owed, so the guest is owed a receipt
- * for that money as much as they would be if an admin had clicked "Balance paid".
+ * Completing a booking settles whatever was still owed, and the completed email says so
+ * itself. A separate "balance received" email on top of it would be the guest's second
+ * email about the same click.
  */
-test('completing a booking that still owes money emails both the status change and the balance receipt', function () {
+test('completing a booking that still owes money sends one email that covers the balance', function () {
     // Finished, because a booking can only be completed once its event is over.
     $booking = Booking::factory()->for($this->hall)->confirmed()->create([
         'guest_email' => 'juan@example.com',
@@ -104,7 +110,8 @@ test('completing a booking that still owes money emails both the status change a
     expect($booking->transitionTo(BookingStatus::Completed))->toBeTrue();
 
     Notification::assertSentOnDemand(ReservationStatusChanged::class, addressedTo('juan@example.com'));
-    Notification::assertSentOnDemand(ReservationBalanceSettled::class, addressedTo('juan@example.com'));
+    Notification::assertSentOnDemandTimes(ReservationBalanceSettled::class, 0);
+    expect($booking->fresh()->balance_settled_at)->not->toBeNull();
 });
 
 test('completing a booking that is already paid up sends only the status change', function () {
@@ -119,7 +126,7 @@ test('completing a booking that is already paid up sends only the status change'
     expect($booking->transitionTo(BookingStatus::Completed))->toBeTrue();
 
     Notification::assertSentOnDemand(ReservationStatusChanged::class, addressedTo('juan@example.com'));
-    Notification::assertNotSentTo(new AnonymousNotifiable, ReservationBalanceSettled::class);
+    Notification::assertSentOnDemandTimes(ReservationBalanceSettled::class, 0);
 });
 
 test('settling an already-settled balance sends nothing', function () {
@@ -187,7 +194,6 @@ test('every reservation email renders its template', function (string $notificat
         ->toContain($this->hall->name);
 })->with([
     ReservationReceived::class,
-    ReservationStatusChanged::class,
     ReservationBalanceSettled::class,
     ReservationPaymentFailed::class,
     ReservationHoldExpired::class,
@@ -205,8 +211,13 @@ test('each status change is written in its own template', function (BookingStatu
     'confirmed' => [BookingStatus::Confirmed, 'Your booking is confirmed'],
     'completed' => [BookingStatus::Completed, 'Your reservation is now complete'],
     'cancelled' => [BookingStatus::Cancelled, 'Your booking has been cancelled'],
-    'reinstated' => [BookingStatus::Pending, 'Your booking is back with us'],
 ]);
+
+test('there is no status email for moving a booking back to pending', function () {
+    $booking = Booking::factory()->for($this->hall)->create();
+
+    (new ReservationStatusChanged($booking->toSummary()))->toMail($booking);
+})->throws(LogicException::class);
 
 /**
  * Marking a booking done settles whatever was owed, but the summary still carries the
@@ -228,7 +239,7 @@ test('the completed email shows the booking as paid in full', function () {
     expect($mail->subject)->toBe("Your booking is complete — {$booking->reference}");
     expect($rendered)
         ->toContain('Thank you, Juan dela Cruz')
-        ->toContain('paid in full')
+        ->toContain('We have received your remaining balance of ₱'.number_format($booking->balance))
         ->toMatch('#>Paid</strong></td>\s*<td[^>]*>₱'.number_format($booking->total).'</td>#u')
         ->toMatch('#>Balance</strong></td>\s*<td[^>]*>₱0</td>#u');
 });
@@ -253,4 +264,77 @@ test('an admin moving a booking on from the panel emails the guest', function ()
     expect($booking->fresh()->status)->toBe(BookingStatus::Confirmed);
 
     Notification::assertSentOnDemand(ReservationStatusChanged::class, addressedTo('juan@example.com'));
+});
+
+/*
+|--------------------------------------------------------------------------
+| Resort contact
+|--------------------------------------------------------------------------
+|
+| Staff set the resort's email and number in Settings → Mail. Guests reply to it, and
+| every email they receive tells them how to reach it.
+|
+*/
+
+test('guest email replies go to the resort contact and show how to reach it', function (string $notificationClass) {
+    ResortSetting::factory()->create(['contact_email' => 'frontdesk@jehovens.com', 'contact_phone' => '0917 123 4567']);
+
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create();
+
+    $mail = (new $notificationClass($booking->toSummary()))->toMail($booking);
+
+    expect($mail->replyTo)->toBe([['frontdesk@jehovens.com', null]])
+        ->and((string) $mail->render())
+        ->toContain('Questions?')
+        ->toContain('frontdesk@jehovens.com')
+        ->toContain('0917 123 4567');
+})->with([
+    ReservationReceived::class,
+    ReservationStatusChanged::class,
+    ReservationBalanceSettled::class,
+    ReservationPaymentFailed::class,
+    ReservationHoldExpired::class,
+]);
+
+test('a contact with only a number still tells the guest how to reach the resort', function () {
+    ResortSetting::factory()->create(['contact_email' => null, 'contact_phone' => '0917 123 4567']);
+
+    $booking = Booking::factory()->for($this->hall)->create();
+
+    $mail = (new ReservationReceived($booking->toSummary()))->toMail($booking);
+
+    expect($mail->replyTo)->toBe([])
+        ->and((string) $mail->render())->toContain('Call or text us at 0917 123 4567');
+});
+
+test('without a resort contact, replies go to the sending address and no contact line is shown', function () {
+    $booking = Booking::factory()->for($this->hall)->create();
+
+    $mail = (new ReservationReceived($booking->toSummary()))->toMail($booking);
+
+    expect($mail->replyTo)->toBe([])
+        ->and((string) $mail->render())->not->toContain('Questions?');
+});
+
+test('a reply to the new-booking alert goes to the guest, not back to the resort', function () {
+    ResortSetting::factory()->create(['contact_email' => 'frontdesk@jehovens.com']);
+
+    $booking = Booking::factory()->for($this->hall)->create(['guest_email' => 'juan@example.com']);
+
+    $mail = (new NewReservationAlert($booking->toSummary()))->toMail($booking);
+
+    expect($mail->replyTo)->toBe([['juan@example.com', null]])
+        ->and((string) $mail->render())->not->toContain('Questions?');
+});
+
+test('a guest email still goes out if the resort settings cannot be read', function () {
+    Exceptions::fake();
+    Schema::drop('resort_settings');
+
+    $booking = Booking::factory()->for($this->hall)->create();
+
+    $rendered = (string) (new ReservationReceived($booking->toSummary()))->toMail($booking)->render();
+
+    expect($rendered)->toContain($booking->reference)->not->toContain('Questions?');
+    Exceptions::assertReported(QueryException::class);
 });

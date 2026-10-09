@@ -45,7 +45,10 @@ return [
             'port' => env('MAIL_PORT', 2525),
             'username' => env('MAIL_USERNAME'),
             'password' => env('MAIL_PASSWORD'),
-            'timeout' => null,
+            // Booking mail is sent inline, so an unreachable mail server would otherwise
+            // hold the admin's click or PayMongo's webhook for PHP's 60-second socket
+            // default — per email. Ten seconds is ample for a server that is up.
+            'timeout' => (int) env('MAIL_TIMEOUT', 10),
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 

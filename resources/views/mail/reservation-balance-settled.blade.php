@@ -6,6 +6,8 @@
 
 @include('mail.partials.reservation-details', ['paidInFull' => true])
 
+@include('mail.partials.resort-contact')
+
 {{ __('Thanks,') }}<br>
 {{ config('app.name') }}
 </x-mail::message>

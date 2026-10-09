@@ -7,6 +7,7 @@ use App\Models\CateringPackage;
 use App\Models\Hall;
 use App\Models\Room;
 use App\Models\RoomBooking;
+use App\Support\DeliverMail;
 use Flux\Flux;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -362,7 +363,7 @@ class extends Component {
         if ($target->isFinal()) {
             Flux::modal('booking-detail')->close();
 
-            Flux::toast(variant: 'success', text: __(':reference is :status and moved to History.', [
+            $this->toastDone(__(':reference is :status and moved to History.', [
                 'reference' => $booking->reference,
                 'status' => strtolower($target->shortLabel()),
             ]));
@@ -370,7 +371,7 @@ class extends Component {
             return;
         }
 
-        Flux::toast(variant: 'success', text: __(':reference is now :status.', [
+        $this->toastDone(__(':reference is now :status.', [
             'reference' => $booking->reference,
             'status' => strtolower($target->shortLabel()),
         ]));
@@ -392,10 +393,31 @@ class extends Component {
 
         $this->refreshLists();
 
-        Flux::toast(variant: 'success', text: __('Balance of ₱:amount recorded for :reference.', [
+        $this->toastDone(__('Balance of ₱:amount recorded for :reference.', [
             'amount' => number_format($booking->balance),
             'reference' => $booking->reference,
         ]));
+    }
+
+    /**
+     * Confirm a change went through — and say so plainly if the guest's email did not.
+     *
+     * The change itself has already saved; only the email failed. Staff need to know,
+     * because the guest has not been told and someone may have to call them.
+     */
+    private function toastDone(string $message): void
+    {
+        if (app(DeliverMail::class)->failures() === []) {
+            Flux::toast(variant: 'success', text: $message);
+
+            return;
+        }
+
+        Flux::toast(
+            variant: 'warning',
+            duration: 10000,
+            text: $message.' '.__('But the email to the guest could not be sent — check Settings → Mail.'),
+        );
     }
 
     /**

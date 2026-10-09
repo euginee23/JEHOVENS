@@ -33,8 +33,7 @@ return [
     | without an account, so there is no user record to notify.
     |
     | Note that MAIL_MAILER defaults to `log`, which writes mail to the log
-    | rather than sending it, and that queued mail needs a running worker
-    | (`php artisan queue:work`). Both must be set up before going live.
+    | rather than sending it. Point it at a real transport before going live.
     |
     */
 
@@ -42,12 +41,24 @@ return [
         // `?:` rather than an env() default, so an empty RESORT_NOTIFICATION_EMAIL=
         // line in .env falls back too instead of leaving nowhere to deliver.
         'admin_email' => env('RESORT_NOTIFICATION_EMAIL') ?: env('ADMIN_EMAIL', 'admin@admin.com'),
+    ],
 
-        // Where `php artisan resort:mail-check` sends its test message. A separate
-        // setting from the address above so the mail transport can be tested against a
-        // real inbox you can actually open, without pointing live booking alerts there.
-        // Falls back to the admin address, and `--to=` overrides both.
-        'test_email' => env('RESORT_MAIL_TEST_ADDRESS'),
+    /*
+    |--------------------------------------------------------------------------
+    | Mail Delivery
+    |--------------------------------------------------------------------------
+    |
+    | By default every booking email is sent immediately, during the request
+    | that triggers it, so it leaves even on a server with no queue worker.
+    | Set RESORT_MAIL_QUEUED=true only where a worker (`php artisan queue:work`)
+    | or QUEUE_DRAIN_ON_SCHEDULE is kept running — without one, queued emails
+    | wait in the jobs table and are never sent.
+    |
+    */
+
+    'mail' => [
+        'queued' => (bool) env('RESORT_MAIL_QUEUED', false),
+        'queue' => env('RESORT_MAIL_QUEUE', 'default'),
     ],
 
 ];

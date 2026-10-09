@@ -9,6 +9,7 @@ Route::prefix('admin')->group(function () {
         Route::redirect('settings', '/admin/settings/profile');
 
         Route::livewire('settings/profile', 'pages::settings.profile')->name('profile.edit');
+        Route::livewire('settings/mail', 'pages::settings.mail')->name('mail-settings.edit');
     });
 
     Route::middleware(['auth', 'verified'])->group(function () {

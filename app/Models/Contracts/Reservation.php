@@ -6,8 +6,8 @@ use App\Enums\BookingStatus;
 use App\Enums\PaymentStatus;
 use App\Models\Concerns\HasReservationDates;
 use App\Models\Concerns\ManagesReservationLifecycle;
+use App\Notifications\ReservationNotification;
 use App\Support\ReservationSummary;
-use Illuminate\Notifications\Notification;
 
 /**
  * Something a guest has booked and paid for — a hall booking, a room booking, or a
@@ -78,7 +78,7 @@ interface Reservation extends Schedulable
     /**
      * Tell the guest something about this reservation.
      */
-    public function notifyGuestOf(Notification $notification): void;
+    public function notifyGuestOf(ReservationNotification $notification): void;
 
     /**
      * This reservation flattened into the shape the emails and admin lists read.

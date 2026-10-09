@@ -9,6 +9,8 @@
 
 {{ __('If you think this is a mistake, reply to this email with your reference and we will look into it.') }}
 
+@include('mail.partials.resort-contact')
+
 {{ __('Thanks,') }}<br>
 {{ config('app.name') }}
 </x-mail::message>

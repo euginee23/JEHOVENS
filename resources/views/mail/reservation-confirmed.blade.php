@@ -10,6 +10,8 @@
 {{ __('Please settle the remaining ₱:balance on arrival.', ['balance' => number_format($reservation->balance)]) }}
 @endif
 
+@include('mail.partials.resort-contact')
+
 {{ __('Thanks,') }}<br>
 {{ config('app.name') }}
 </x-mail::message>

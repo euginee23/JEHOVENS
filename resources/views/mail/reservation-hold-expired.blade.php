@@ -13,6 +13,8 @@
 {{ __('Book again') }}
 </x-mail::button>
 
+@include('mail.partials.resort-contact')
+
 {{ __('Thanks,') }}<br>
 {{ config('app.name') }}
 </x-mail::message>

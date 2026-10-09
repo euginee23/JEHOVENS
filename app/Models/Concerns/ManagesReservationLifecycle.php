@@ -8,12 +8,12 @@ use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Notifications\NewReservationAlert;
 use App\Notifications\ReservationBalanceSettled;
+use App\Notifications\ReservationNotification;
 use App\Notifications\ReservationReceived;
 use App\Notifications\ReservationStatusChanged;
+use App\Support\DeliverMail;
 use App\Support\ReservationSummary;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
-use Illuminate\Notifications\Notification;
-use Illuminate\Support\Facades\Notification as Notifications;
 
 /**
  * Status, balance and email handling shared by hall bookings, room bookings and
@@ -158,15 +158,10 @@ trait ManagesReservationLifecycle
 
         // `$notify` is off when the caller is already telling the guest something better
         // about the same event — a payment confirmation says far more than "now confirmed".
+        // Completing a booking that still owed money settles it too, but the completed
+        // email already says it is paid in full, so no separate balance receipt follows.
         if ($notify) {
             $this->notifyGuest(new ReservationStatusChanged($this->toSummary()));
-        }
-
-        // Money changing hands is worth its own receipt. Settling the balance through
-        // `settleBalance()` sends one, and completing a booking that still owed money
-        // used to be the one path that quietly skipped it.
-        if ($settledNow && $notify) {
-            $this->notifyGuest(new ReservationBalanceSettled($this->toSummary()));
         }
 
         return true;
@@ -263,8 +258,10 @@ trait ManagesReservationLifecycle
 
         $this->notifyGuest(new ReservationReceived($summary));
 
-        Notifications::route('mail', config('resort.notifications.admin_email'))
-            ->notify(new NewReservationAlert($summary));
+        app(DeliverMail::class)(
+            (string) config('resort.notifications.admin_email'),
+            new NewReservationAlert($summary),
+        );
     }
 
     /**
@@ -281,7 +278,7 @@ trait ManagesReservationLifecycle
      * The public way in, for the payment handling that lives outside this trait. Anything
      * the resort sends a guest still goes through here, so `guest_email` is checked once.
      */
-    public function notifyGuestOf(Notification $notification): void
+    public function notifyGuestOf(ReservationNotification $notification): void
     {
         $this->notifyGuest($notification);
     }
@@ -292,12 +289,12 @@ trait ManagesReservationLifecycle
      * Addressed rather than sent to a User: most guests book without an account, so
      * `user_id` is usually null and `guest_email` is the only way to reach them.
      */
-    protected function notifyGuest(Notification $notification): void
+    protected function notifyGuest(ReservationNotification $notification): void
     {
         if (blank($this->guest_email)) {
             return;
         }
 
-        Notifications::route('mail', $this->guest_email)->notify($notification);
+        app(DeliverMail::class)($this->guest_email, $notification);
     }
 }

@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Booking;
 use App\Models\Hall;
 use App\Notifications\NewReservationAlert;
+use App\Notifications\ReservationBalanceSettled;
 use App\Notifications\ReservationPaymentFailed;
 use App\Notifications\ReservationReceived;
 use App\Support\PayMongoSignature;
@@ -123,6 +124,15 @@ test('a paid checkout emails the guest their receipt and alerts the resort', fun
 
     Notification::assertSentOnDemand(ReservationReceived::class);
     Notification::assertSentOnDemand(NewReservationAlert::class);
+});
+
+test('a guest who pays in full gets one receipt, not a separate balance email', function () {
+    $this->booking->update(['downpayment' => $this->booking->total, 'balance' => 0]);
+
+    deliverWebhook(signedWebhook('checkout_session.payment.paid', sessionFor($this->booking->fresh())));
+
+    Notification::assertSentOnDemandTimes(ReservationReceived::class, 1);
+    Notification::assertSentOnDemandTimes(ReservationBalanceSettled::class, 0);
 });
 
 /*

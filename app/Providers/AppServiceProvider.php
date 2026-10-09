@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\DeliverMail;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Scoped, so the failures it remembers belong to one request or queued job.
+        $this->app->scoped(DeliverMail::class);
     }
 
     /**
