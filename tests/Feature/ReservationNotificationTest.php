@@ -10,6 +10,8 @@ use App\Models\RoomBooking;
 use App\Models\User;
 use App\Notifications\NewReservationAlert;
 use App\Notifications\ReservationBalanceSettled;
+use App\Notifications\ReservationHoldExpired;
+use App\Notifications\ReservationPaymentFailed;
 use App\Notifications\ReservationReceived;
 use App\Notifications\ReservationStatusChanged;
 use Illuminate\Notifications\AnonymousNotifiable;
@@ -167,9 +169,9 @@ test('the guest email carries the reference and the dates it covers', function (
 });
 
 /**
- * Notification::fake() records notifications without ever calling toMail(), so the shared
- * Blade template these are all built from needs rendering somewhere or a broken one would
- * sail through every test above.
+ * Notification::fake() records notifications without ever calling toMail(), so each email's
+ * Blade template needs rendering somewhere or a broken one would sail through every test
+ * above.
  */
 test('every reservation email renders its template', function (string $notificationClass) {
     $booking = Booking::factory()->for($this->hall)->create([
@@ -187,8 +189,49 @@ test('every reservation email renders its template', function (string $notificat
     ReservationReceived::class,
     ReservationStatusChanged::class,
     ReservationBalanceSettled::class,
+    ReservationPaymentFailed::class,
+    ReservationHoldExpired::class,
     NewReservationAlert::class,
 ]);
+
+test('each status change is written in its own template', function (BookingStatus $status, string $heading) {
+    $booking = Booking::factory()->for($this->hall)->create(['guest_name' => 'Juan dela Cruz']);
+    $booking->status = $status;
+
+    $rendered = (string) (new ReservationStatusChanged($booking->toSummary()))->toMail($booking)->render();
+
+    expect($rendered)->toContain($heading)->toContain($booking->reference);
+})->with([
+    'confirmed' => [BookingStatus::Confirmed, 'Your booking is confirmed'],
+    'completed' => [BookingStatus::Completed, 'Your reservation is now complete'],
+    'cancelled' => [BookingStatus::Cancelled, 'Your booking has been cancelled'],
+    'reinstated' => [BookingStatus::Pending, 'Your booking is back with us'],
+]);
+
+/**
+ * Marking a booking done settles whatever was owed, but the summary still carries the
+ * balance as it stood at booking. The guest being told their stay is closed must not see
+ * that money listed as still owing.
+ */
+test('the completed email shows the booking as paid in full', function () {
+    $booking = Booking::factory()->for($this->hall)->confirmed()->create([
+        'guest_name' => 'Juan dela Cruz',
+        'start_date' => today()->subWeek()->toDateString(),
+    ]);
+
+    expect($booking->balance)->toBeGreaterThan(0);
+    expect($booking->transitionTo(BookingStatus::Completed))->toBeTrue();
+
+    $mail = (new ReservationStatusChanged($booking->toSummary()))->toMail($booking);
+    $rendered = (string) $mail->render();
+
+    expect($mail->subject)->toBe("Your booking is complete — {$booking->reference}");
+    expect($rendered)
+        ->toContain('Thank you, Juan dela Cruz')
+        ->toContain('paid in full')
+        ->toMatch('#>Paid</strong></td>\s*<td[^>]*>₱'.number_format($booking->total).'</td>#u')
+        ->toMatch('#>Balance</strong></td>\s*<td[^>]*>₱0</td>#u');
+});
 
 test('a room email renders the stay rather than a bare hour count', function () {
     $room = Room::factory()->withRates([24 => 2500])->create(['name' => 'Standard Room 101']);

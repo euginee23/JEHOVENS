@@ -11,9 +11,9 @@ use Illuminate\Notifications\Notification;
 /**
  * Base for every email the resort sends about a reservation.
  *
- * All of them show the same block of booking details, so they are all built from a
- * ReservationSummary and share one Blade template. A subclass only supplies the wording
- * around it.
+ * Each email has its own Blade template under resources/views/mail, so its wording can be
+ * edited on its own. They all show the same block of booking details, built from a
+ * ReservationSummary and drawn by the shared mail.partials.reservation-details partial.
  *
  * Guests mostly book without an account, so these are sent to an address rather than to
  * a User — see ManagesReservationLifecycle::notifyGuest().
@@ -40,22 +40,9 @@ abstract class ReservationNotification extends Notification implements ShouldQue
     abstract protected function subject(): string;
 
     /**
-     * The heading at the top of the email.
+     * The Blade view this email is written in.
      */
-    abstract protected function heading(): string;
-
-    /**
-     * The sentence explaining why this email arrived.
-     */
-    abstract protected function intro(): string;
-
-    /**
-     * An optional closing line, below the booking details.
-     */
-    protected function outro(): ?string
-    {
-        return null;
-    }
+    abstract protected function template(): string;
 
     /**
      * Get the mail representation of the notification.
@@ -64,12 +51,7 @@ abstract class ReservationNotification extends Notification implements ShouldQue
     {
         return (new MailMessage)
             ->subject($this->subject())
-            ->markdown('mail.reservation', [
-                'reservation' => $this->reservation,
-                'heading' => $this->heading(),
-                'intro' => $this->intro(),
-                'outro' => $this->outro(),
-            ]);
+            ->markdown($this->template(), ['reservation' => $this->reservation]);
     }
 
     /**

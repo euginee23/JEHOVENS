@@ -17,22 +17,8 @@ class ReservationReceived extends ReservationNotification
         return __('Your booking is confirmed — :reference', ['reference' => $this->reservation->reference]);
     }
 
-    protected function heading(): string
+    protected function template(): string
     {
-        return __('Thanks, :name — you are booked in', ['name' => $this->reservation->guestName]);
-    }
-
-    protected function intro(): string
-    {
-        return __('We have received your payment of ₱:paid and your booking is confirmed. Your payment reference is below — keep this email, and quote your booking reference when you arrive.', [
-            'paid' => number_format($this->reservation->paid),
-        ]);
-    }
-
-    protected function outro(): ?string
-    {
-        return $this->reservation->balance >= 1
-            ? (string) __('Please settle the remaining ₱:balance on arrival.', ['balance' => number_format($this->reservation->balance)])
-            : null;
+        return 'mail.reservation-received';
     }
 }

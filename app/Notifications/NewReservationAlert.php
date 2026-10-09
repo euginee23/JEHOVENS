@@ -18,21 +18,8 @@ class NewReservationAlert extends ReservationNotification
         ]);
     }
 
-    protected function heading(): string
+    protected function template(): string
     {
-        return __('New :type booking to review', ['type' => mb_strtolower($this->reservation->type)]);
-    }
-
-    protected function intro(): string
-    {
-        return __(':name has booked :detail and says the payment is sent. It is waiting in the admin panel as pending.', [
-            'name' => $this->reservation->guestName,
-            'detail' => $this->reservation->detail,
-        ]);
-    }
-
-    protected function outro(): string
-    {
-        return __('Contact: :email', ['email' => $this->reservation->guestEmail]);
+        return 'mail.new-reservation-alert';
     }
 }

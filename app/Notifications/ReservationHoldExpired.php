@@ -15,18 +15,8 @@ class ReservationHoldExpired extends ReservationNotification
         return __('Your booking was not completed — :reference', ['reference' => $this->reservation->reference]);
     }
 
-    protected function heading(): string
+    protected function template(): string
     {
-        return __('We have released your dates');
-    }
-
-    protected function intro(): string
-    {
-        return __('We held the dates below while you paid, but the payment was never completed, so they have gone back on sale. Nothing has been charged.');
-    }
-
-    protected function outro(): string
-    {
-        return __('Still want them? Book again — they may well still be free.');
+        return 'mail.reservation-hold-expired';
     }
 }

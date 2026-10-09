@@ -12,13 +12,8 @@ class ReservationBalanceSettled extends ReservationNotification
         return __('Balance received — :reference', ['reference' => $this->reservation->reference]);
     }
 
-    protected function heading(): string
+    protected function template(): string
     {
-        return __('Your balance is settled');
-    }
-
-    protected function intro(): string
-    {
-        return __('We have received the rest of your payment. Nothing further is owed on this booking.');
+        return 'mail.reservation-balance-settled';
     }
 }
